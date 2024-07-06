@@ -144,8 +144,12 @@ def do_compare(dir1, dir2, params, level = 0):
 
             if path1kind != path2kind:
                 # объекты различаются типом
-                print(space, '"{}" is "{}" but "{}" is "{}"' . format(path1, path1kind, path2, path2kind))
                 diffs_count += 1
+                #print(space, '"{}" is "{}" but "{}" is "{}"' . format(path1, path1kind, path2, path2kind))
+                print(str(diffs_count) + ") reason: are differ by kind")
+                print("  ", path1kind, path1)
+                print("  ", path2kind, path2)
+                print()
                 continue
             # объекты одного типа (файл или каталог)
             if path1kind == "d" and path2kind == "d":
@@ -179,19 +183,28 @@ def do_compare(dir1, dir2, params, level = 0):
 
                 if len(diffs_list) > 0:
                     # есть различие в файлах
-                    print(space, '"{}" and "{}" are differ by:' . format(path1, path2), ", ".join(diffs_list))
                     diffs_count += 1
-
+                    #print(space, '"{}" and "{}" are differ by:' . format(path1, path2), ", ".join(diffs_list))
+                    print(str(diffs_count) + ") reason: are differ by", ", ".join(diffs_list))
+                    print("  " + path1)
+                    print("  " + path2)
+                    print()
 
         else:
             # объект существует только в одном каталоге
             path1exists = os.path.exists(path1)
             path2exists = os.path.exists(path2)
-            if path1exists:
-                print(space, '"{}" exists but "{}" not exists' . format(path1, path2))
-            if path2exists:
-                print(space, '"{}" exists but "{}" not exists' . format(path2, path1))
             diffs_count += 1
+            print(str(diffs_count) + ") reason: exists/not exists")
+            if path1exists:
+                #print(space, '"{}" exists but "{}" not exists' . format(path1, path2))
+                print("  exists:     " + path1)
+                print("  not exists: " + path2)
+            if path2exists:
+                #print(space, '"{}" exists but "{}" not exists' . format(path2, path1))
+                print("  exists:     " + path2)
+                print("  not exists: " + path1)
+            print()
             #print(path1, path2)
 
     if level == 0:
