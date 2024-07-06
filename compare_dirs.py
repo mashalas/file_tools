@@ -81,21 +81,36 @@ def get_file_hash(filename, block_size = 2**20):
 
 
 def do_compare(dir1, dir2, params, level = 0):
+    global diffs_count
     if level == 0:
         print("--- compare [{}] and [{}] ---" . format(dir1, dir2))
-    global diffs_count
     space = ""
     for i in range(level):
         space += "  "
     #print("enter to {} and {}" . format(dir1, dir2))
+
     if not os.path.isdir(dir1):
         print(space, "Directory [{}] does not exist." . format(dir1))
         return False
     if not os.path.isdir(dir2):
         print(space, "Directory [{}] does not exist." . format(dir2))
         return False
-    dir1items = os.listdir(dir1)
-    dir2items = os.listdir(dir2)
+
+
+    errors_found = False
+    try:
+        dir1items = os.listdir(dir1)
+    except:
+        errors_found = True
+        print(space, "Cannot read contents for [{}]" . format(dir1))
+    try:
+        dir2items = os.listdir(dir2)
+    except:
+        errors_found = True
+        print(space, "Cannot read contents for [{}]" . format(dir2))
+    if errors_found:
+        return False
+
     bothitems = dir1items + dir2items
     bothitems = list(set(bothitems))
     #print(dir1items); print(dir2items)
@@ -129,7 +144,7 @@ def do_compare(dir1, dir2, params, level = 0):
 
             if path1kind != path2kind:
                 # объекты различаются типом
-                print(space, '{} is "{}" but {} is "{}"' . format(path1, path1kind, path2, path2kind))
+                print(space, '"{}" is "{}" but "{}" is "{}"' . format(path1, path1kind, path2, path2kind))
                 diffs_count += 1
                 continue
             # объекты одного типа (файл или каталог)
@@ -164,7 +179,7 @@ def do_compare(dir1, dir2, params, level = 0):
 
                 if len(diffs_list) > 0:
                     # есть различие в файлах
-                    print(space, "{} and {} are differ by:" . format(path1, path2), ", ".join(diffs_list))
+                    print(space, '"{}" and "{}" are differ by:' . format(path1, path2), ", ".join(diffs_list))
                     diffs_count += 1
 
 
@@ -173,13 +188,15 @@ def do_compare(dir1, dir2, params, level = 0):
             path1exists = os.path.exists(path1)
             path2exists = os.path.exists(path2)
             if path1exists:
-                print(space, "{} exists but {} not exists" . format(path1, path2))
+                print(space, '"{}" exists but "{}" not exists' . format(path1, path2))
             if path2exists:
-                print(space, "{} exists but {} not exists" . format(path2, path1))
-            diffs_count += 1                
+                print(space, '"{}" exists but "{}" not exists' . format(path2, path1))
+            diffs_count += 1
+            #print(path1, path2)
 
     if level == 0:
         print("Differences found: {}." . format(diffs_count))
+    return True
 
 
 if __name__ == "__main__":
