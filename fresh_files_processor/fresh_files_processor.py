@@ -7,6 +7,12 @@ import fnmatch
 from pprint import pprint
 import datetime
 
+
+def get_timestamp():
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+#print(get_timestamp()); exit(0)
+
 #----- Из строки вида key=value выделить ключ и значение (возможно, убрать пробелы/табуляции) -----
 def split_key_value(
         s,
@@ -127,6 +133,28 @@ def get_files_list(dirname, files_masks):
     return found
 
 
+def read_processed_files(filename):
+    result = set()
+    if filename == None:
+        return result
+    if len(filename) == None:
+        return result
+    if not os.path.isfile(filename):
+        return result
+    with open(filename, "rt") as f:
+        for s in f:
+            s = s.strip()
+            if len(s) == 0:
+                continue
+            if s[0] == "#":
+                continue
+            ts, path = split_key_value(s, "\t")
+            if ts == None or path == None or ts == "" or path == "":
+                continue
+            result.add(path)
+    return result
+
+
 def file_to_array(filename):
     result = []
     if filename == None:
@@ -160,14 +188,13 @@ def process_config(config_path):
         print("SortBy:", config["sort_by"], "   reverse=", config["sort_reverse"], sep="")
         files_list = sorted(files_list, key=lambda d: d[config["sort_by"]], reverse=config["sort_reverse"])
     #print("--- files_list: ---"); pprint(files_list); print("... end of files_list ...")
-    processed_list = file_to_array(config["processed"])
-    #print("processed_list:", processed_list)
+    processed_files = read_processed_files(config["processed"])
 
     f_processed = None
     if config["processed"] != None and len(config["processed"]) > 0:
         f_processed = open(config["processed"], "at")
     for one_file_dict in files_list:
-        if one_file_dict["longname"] in processed_list:
+        if one_file_dict["longname"] in processed_files:
             # файл уже обрабатывался ранее
             print("skip file '{}' because it was processed earlier" . format(one_file_dict["longname"]))
             continue
@@ -181,7 +208,12 @@ def process_config(config_path):
             os.system(one_cmd)
         
         if f_processed != None:
-            f_processed.write(one_file_dict["longname"] + "\n")
+            f_processed.write(
+                get_timestamp() +
+                "\t" +
+                one_file_dict["longname"] + 
+                "\n"
+            )
     if f_processed != None:
         f_processed.close()
     return True
