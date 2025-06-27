@@ -9,32 +9,49 @@ import datetime
 
 class FFPConfig():
     def __init__(self, filename) -> None:
+        STATE__NOT_COMMANDS = "not_commands"
+        STATE__PRIOR_COMMANDS = "prior_commands"
+        STATE__COMMANDS = "commands"
+        STATE__POST_COMMANDS = "post_commands"
+        state = STATE__NOT_COMMANDS
+        
         self._filename = filename
         self.dir = []
         self.mask = []
         self.processed = None
         self.sort_by = None
         self.sort_reverse = False
+        self.prior_commands = []
         self.commands = []
+        self.post_commands = []
         self.only_newer = None
         self.skip_newer = None
         with open(filename, "rt") as f:
-            reading_commands_now = False
+            #reading_commands_now = False
             for s in f:
                 s = s.strip()
                 if len(s) == 0:
                     continue
                 if s[0] == "#":
                     continue # комментарий
+                if s == "<prior_commands>":
+                    # начался блок с командами операционной системы выполняемыми до начала обработки файлов
+                    state = STATE__PRIOR_COMMANDS
+                    continue
                 if s == "<commands>":
-                    # начался блок с командами операционной системы
-                    reading_commands_now = True
+                    # начался блок с командами операционной системы обработки файлов
+                    state = STATE__COMMANDS
                     continue
-                if s == "</commands>":
+                if s == "<post_commands>":
+                    # начался блок с командами операционной системы выполняемым после обработки файлов
+                    state = STATE__POST_COMMANDS
+                    continue
+                if s in ["</commands>", "</prior_commands>", "</post_commands>"]:
                     # закончился блок с командами операционной системы
-                    reading_commands_now = False
+                    state = STATE__NOT_COMMANDS
                     continue
-                if not reading_commands_now:
+                
+                if state == STATE__NOT_COMMANDS:
                     key, value = split_key_value(s, sep="=", strip_spaces_in_key=True, strip_spaces_in_value_begin=True, strip_spaces_in_value_end=True)
                     #print(s, key, value)
                     if key == "dir":
@@ -57,8 +74,13 @@ class FFPConfig():
                         self.skip_newer = get_date_time_from_string(value)
                     else:
                         print("WARNING! Unprocessable key '{}' with value '{}'" . format(key, value))
-                if reading_commands_now:
+                elif state == STATE__PRIOR_COMMANDS:
+                    self.prior_commands.append(s)
+                elif state == STATE__COMMANDS:
                     self.commands.append(s)
+                elif state == STATE__POST_COMMANDS:
+                    self.prior_commands.append(s)
+                    
     # ... end of class FFPConfig ...
 
 
@@ -288,13 +310,25 @@ def read_processed_files(filename):
     return result
 
 
+def execute_commands(commands, vars = {}):
+    for one_cmd in commands:
+        for key in vars.keys():
+            if type(vars[key]) != type("abc"):
+                # если атрибут не является строкой - сделать его строкой, чтобы можно было использовать в качестве значения переменной
+                vars[key] = str(vars[key])
+            one_cmd = one_cmd.replace("${" + key + "}", vars[key])
+        print("  ", one_cmd)
+        os.system(one_cmd)
+    print("")
+
+
 # ----- Обработка конфигурационного файла -----
 def process_config(config_path):
     if not os.path.isfile(config_path):
         print("File {} not found." . format(config_path))
         return False
     config = FFPConfig(config_path)
-    #print("--- config: ---"); pprint(config.__dict__); print("--- end of config ---")
+    #print("--- config: ---"); pprint(config.__dict__); print("--- end of config ---"); exit(0)
     files_list = []
     for elem in config.dir:
         files_list += get_files_list(elem, config.mask, config.skip_newer, config.only_newer)
@@ -304,6 +338,8 @@ def process_config(config_path):
         files_list = sorted(files_list, key=lambda d: d[config.sort_by], reverse=config.sort_reverse)
     #print("--- files_list: ---"); pprint(files_list); print("... end of files_list ..."); exit(0)
     processed_files = read_processed_files(config.processed)
+
+    execute_commands(config.prior_commands) # команды до обработки файлов
 
     f_processed = None
     if config.processed != None and len(config.processed) > 0:
@@ -315,15 +351,7 @@ def process_config(config_path):
             continue
         #print(one_file_dict)
         print("process '{}'" . format(one_file_dict["longname"]))
-        for one_cmd in config.commands:
-            for key in one_file_dict.keys():
-                if type(one_file_dict[key]) != type("abc"):
-                    # если атрибут файла не является строкой - сделать его строкой, чтобы можно было использовать в качестве значения переменной
-                    one_file_dict[key] = str(one_file_dict[key])
-                one_cmd = one_cmd.replace("${" + key + "}", one_file_dict[key])
-            print("  ", one_cmd)
-            os.system(one_cmd)
-        print("")
+        execute_commands(config.commands, one_file_dict.copy())
         
         if f_processed != None:
             f_processed.write(
@@ -334,11 +362,14 @@ def process_config(config_path):
             )
     if f_processed != None:
         f_processed.close()
+
+    execute_commands(config.post_commands) # команды после обработки файлов
+
     return True
 
 
 if __name__ == "__main__":
-    #process_config("config1.cfg"); exit(0)
+    process_config("config1.cfg"); exit(0)
     for i in range(1, len(sys.argv)):
         process_config(sys.argv[i])
     
