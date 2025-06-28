@@ -12,6 +12,8 @@ sort_by=mtime
 sort_reverse=true
 only_newer=2025-06-24 04:01:02
 skip_newer=2025-07-25
+min_age=5minutes
+max_age=10d
 
 <prior_commands>
 </prior_commands>
