@@ -61,6 +61,9 @@ def file2date(dst_root_dir, src_file_or_dir, mask = None):
             shutil.copy2(src_file_or_dir, dst_filename) # copy - копирование с сохранением метаинформации (дата изменения файла)
         else:
             print('"{}" already exists' . format(dst_filename))
+    else:
+        # не существует исходный файл или каталог
+        print('WARNING! Source file or directory "{}" does not exist.' . format(src_file_or_dir))
 
 
 if __name__ == "__main__":
