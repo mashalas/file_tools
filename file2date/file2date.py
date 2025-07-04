@@ -15,6 +15,8 @@ SUBDIRS_STRUCTURE = {
     "second": False
 }
 
+PRINT_COPIED = True
+PRINT_SKIPPED = True
 
 def help():
     print("file2data.py <dst_root_dir> <src_file_or_dir> [mask]")
@@ -57,10 +59,12 @@ def file2date(dst_root_dir, src_file_or_dir, mask = None):
             os.makedirs(dst_dir)
         dst_filename = os.path.join(dst_dir, short_filename)
         if not os.path.exists(dst_filename):
-            print('copy "{}" => "{}"' . format(src_file_or_dir, dst_filename))
+            if PRINT_COPIED:
+                print('copy "{}" => "{}"' . format(src_file_or_dir, dst_filename))
             shutil.copy2(src_file_or_dir, dst_filename) # copy - копирование с сохранением метаинформации (дата изменения файла)
         else:
-            print('"{}" already exists' . format(dst_filename))
+            if PRINT_SKIPPED:
+                print('"{}" already exists' . format(dst_filename))
     else:
         # не существует исходный файл или каталог
         print('WARNING! Source file or directory "{}" does not exist.' . format(src_file_or_dir))
