@@ -26,7 +26,7 @@ DEBUG_MODE = True
 _DEBUG_ARGS = []
 #_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--append", "--size", "/tmp", "/var"]
 #_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--size", "-T", "-H", "--no-follow-symlinks", "--min-size=1000", "/tmp"]
-_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--size", "-T", "-H", "--no-follow-symlinks", "--min-size=1000", "--min-age", "10d", "--min-time=2025.02.01", "/tmp"]
+#_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--size", "-T", "-H", "--no-follow-symlinks", "--min-size=1000", "--min-age", "10d", "--min-time=2025.02.01", "/tmp"]
 
 def fill_advanced_hash_methods(methods) -> None:
     for x in hashlib.algorithms_available:
@@ -48,13 +48,14 @@ def get_parser_definiton():
         formatter_class=argparse.RawTextHelpFormatter
     )
 
-    parser.add_argument("-p", "--print", default=False, required=False, action='store_true', help='Дублировать на экран (в <stdout>) строки записываемые в файл результата')
+    #parser.add_argument("-p", "--print", default=False, required=False, action='store_true', help='Дублировать на экран (в <stdout>) строки записываемые в файл результата')
 
     #commands_subparsers = parser.add_subparsers(title='commands', dest='commands')
     subparsers_commands = parser.add_subparsers(help='Справка по командам', dest='command')
 
     hash_methods_str = ", ".join(HASH_METHODS)
     parser_scan = subparsers_commands.add_parser('scan', help='Сканирование')
+    parser_scan.add_argument('-p', '--print', action='store_true', help='Вывод на экран, даже если выполняется вывод в файл (при наличии параметра -o | --output <filename>)')
     parser_scan.add_argument('-o', '--output', help='Файл с результатами сканирования')
     parser_scan.add_argument('-a', '--append', action='store_true', help='Если файл результатов существует - добавить в него вместо создания нового')
     parser_scan.add_argument('-m', '--method', help='Метод вычисления контрольных суммм: ' + hash_methods_str, default=DEFAULT_HASH_METHOD)
@@ -457,6 +458,8 @@ def inc_date(timedelta_str, dt0 = datetime.datetime.now()):
 
     
 def prepare_arguments(args):
+    if (args.print == False or args.print is None) and args.output is None:
+        args.print = True
     args._skip_before = None
     args._skip_after = None
     if not args.min_age is None:
@@ -483,15 +486,18 @@ if __name__ == "__main__":
     parser = get_parser_definiton()
     #print(parser)
     if len(_DEBUG_ARGS) > 0:
+        # использовать отладочные параметры
         args = parser.parse_args(_DEBUG_ARGS)
     else:
+        # использовать реальные параметры командной строки
         if len(sys.argv) == 1:
+            # параметров в командной стрке не задано - вывести справку и выйти
             parser.print_help()
             exit(0)
         args = parser.parse_args()
 
     args = prepare_arguments(args)
-    print("args:", args); exit(0)
+    #print("args:", args); exit(0)
 
     if args.command == 'help':
         print('help...')
@@ -511,4 +517,3 @@ if __name__ == "__main__":
     parser = get_parser_definiton()
     #args = parser.parse_args()
     parser.print_help()
-    pass
