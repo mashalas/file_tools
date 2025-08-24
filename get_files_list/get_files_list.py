@@ -25,8 +25,12 @@ COMMENT_SYMBOL = "#"
 DEBUG_MODE = True
 _DEBUG_ARGS = []
 #_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--append", "--size", "/tmp", "/var"]
-#_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--size", "-T", "-H", "--no-follow-symlinks", "--min-size=1000", "/tmp"]
-#_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--size", "-T", "-H", "--no-follow-symlinks", "--min-size=1000", "--min-age", "10d", "--min-time=2025.02.01", "/tmp"]
+#_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--size", "-T", "-H", "--follow-symlinks", "--min-size=1000", "/tmp"]
+#_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--size", "-T", "-H", "--follow-symlinks", "--min-size=1000", "--min-age", "10d", "--min-time=2025.02.01", "/tmp"]
+
+#SKIP_DEFAULT = [
+#    ".wine/dosdevices"
+#]
 
 def fill_advanced_hash_methods(methods) -> None:
     for x in hashlib.algorithms_available:
@@ -59,10 +63,10 @@ def get_parser_definiton():
     parser_scan.add_argument('-o', '--output', help='Файл с результатами сканирования')
     parser_scan.add_argument('-a', '--append', action='store_true', help='Если файл результатов существует - добавить в него вместо создания нового')
     parser_scan.add_argument('-m', '--method', help='Метод вычисления контрольных суммм: ' + hash_methods_str, default=DEFAULT_HASH_METHOD)
-    parser_scan.add_argument('-S', '--size', action='store_true', help='Получать размер файлов')
+    parser_scan.add_argument('-S', '--size', action='store_true', help='Получать размеры файлов')
     parser_scan.add_argument('-T', '--time', action='store_true', help='Получать время модификации файлов')
-    parser_scan.add_argument('-H', '--hash', action='store_true', help='Получать контрольную сумму файлов')
-    parser_scan.add_argument('--no-follow-symlinks', action='store_true', help='Для символических ссылок на каталоги не переходить в каталог, на который указывает ссылка')
+    parser_scan.add_argument('-H', '--hash', action='store_true', help='Получать контрольные суммы файлов')
+    parser_scan.add_argument('--follow-symlinks', action='store_true', help='Для символических ссылок на каталоги переходить в каталог на который указывает ссылка')
     parser_scan.add_argument('--max-depth', type=int, help='Максимальный уровень сканирования. 0 - без ограничений (по умолчанию), 1 - толоько указанные каталоге без подкаталогов, 2 - указанные каталоги и их подкаталоги первого уровня и т.д.', default=0)
     parser_scan.add_argument('--min-size', type=int, help='Минимальный размер файлов отражаемый в результатах поиска')
     parser_scan.add_argument('--max-size', type=int, help='Максимальный размер файлов отражаемый в результатах поиска')
@@ -289,7 +293,7 @@ def do_scan(root_dir, file_stream, args, depth = INITIAL_DEPTH):
         print_message("Cannot read [{}]" . format(root_dir), MESSAGE_KIND__ERROR, True, file_stream)
         return
 
-    # обработка файлов root_dir
+    # +++ обработка файлов root_dir +++
     for one_item in items:
         path = os.path.join(root_dir, one_item)
         if os.path.islink(path):
@@ -300,11 +304,12 @@ def do_scan(root_dir, file_stream, args, depth = INITIAL_DEPTH):
             if not line is None:
                 print_message(line, MESSAGE_KIND__RAW, args.print, file_stream)
 
-    # обработка каталогов root_dir
+    # +++ обработка каталогов root_dir +++
     for one_item in items:
         path = os.path.join(root_dir, one_item)
         if os.path.isdir(path):
-            if os.path.islink(path) and args.no_follow_symlinks:
+            if os.path.islink(path) and not args.follow_symlinks:
+                # ссылка на каталог и не включен переход по ссылкам - пропустить
                 continue
             path += SLASH
             print_message(path, MESSAGE_KIND__RAW, args.print, file_stream)
