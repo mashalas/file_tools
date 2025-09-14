@@ -13,6 +13,7 @@ INITIAL_DEPTH = 1
 SLASH = "|"
 HASH_METHODS = ['crc32', 'md5', 'crc32', 'sha256', 'sha512', 'sha384', 'sha1']
 DEFAULT_HASH_METHOD = HASH_METHODS[0]
+FILES_DEFAULT_ENCODING = 'utf-8'
 
 MESSAGE_KIND__COMMENT = "c"
 MESSAGE_KIND__VERBOSE = "i"
@@ -24,12 +25,19 @@ MESSAGE_KIND__QUESTION = "q"
 MESSAGE_KIND__RAW = "r"
 COMMENT_SYMBOL = "#"
 
+PREFIX_SCAN = "scan_"
+PREFIX_COMPARE = "compare_"
+PREFIX_BUILD = "build_"
+DEFAULT_EXTENSION = ".txt"
+
 DEBUG_MODE = True
 _DEBUG_ARGS = []
 #_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--append", "--size", "/tmp", "/var"]
 #_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--size", "-T", "-H", "--follow-symlinks", "--min-size=1000", "/tmp"]
 #_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--size", "-T", "-H", "--follow-symlinks", "--min-size=1000", "--min-age", "10d", "--min-time=2025.02.01", "/tmp"]
-#_DEBUG_ARGS = [""]
+#_DEBUG_ARGS = ["compare", "--input", "/home/alexey/bin/scan/results1", "-o", "/home/alexey/bin/compare/results/"]
+
+
 
 # убрать миллисекунды после конвертирования даты в строку: datetime.datetime.utcnow().strftime('%F %T.%f')[:-3]
 #print( datetime.datetime.now().strftime('%F %T.%f')[:-3] ); exit(0) - не работает
@@ -116,15 +124,6 @@ DEFAULT_SKIP = [
 ]
 
 
-def fill_advanced_hash_methods(methods) -> None:
-    for x in hashlib.algorithms_available:
-        if x not in methods:
-            methods.append(x)
-fill_advanced_hash_methods(HASH_METHODS)
-#print(HASH_METHODS); exit(0)
-
-
-
 def get_arg_parser_definiton():
     parser = argparse.ArgumentParser(
         prog = 'get_files_list',
@@ -159,18 +158,32 @@ def get_arg_parser_definiton():
     parser_scan.add_argument('--max-time', help='Файл должен быть изменён до указанной даты в формате "yyyy-mm-dd HH:MM:SS (время можно не указывать)')
     parser_scan.add_argument('--min-age', help='Файл должен существовать дольше указанного интервала (примеры: 1year, 3mn, "4 Day" - один год, 3 месяца, 4 дня)')
     parser_scan.add_argument('--max-age', help='Файл должен существовать меньше указанного интервала (примеры: 1year, 3mn, "4 Day" - один год, 3 месяца, 4 дня)')
-    parser_scan.add_argument('--skip', nargs='*', action="extend", help='Игнорировать файл или каталог соответствующий маске')
-    parser_scan.add_argument('--skip-from', nargs='*', action="extend", help='Маски игнорируемых файлов или каталогов прочитать из файла. Каждая строка файла содержит одну маску. Комментарий - #')
+    parser_scan.add_argument('--skip', nargs='*', action='extend', help='Игнорировать файл или каталог соответствующий маске')
+    parser_scan.add_argument('--skip-from', nargs='*', action='extend', help='Маски игнорируемых файлов или каталогов прочитать из файла. Каждая строка файла содержит одну маску. Комментарий - #')
+    parser_scan.add_argument('-n', '--note', help='Комментарий записываемый в файл результата')
     parser_scan.add_argument('directory', nargs='+', help='Сканируемый каталог (можно указать несколько через пробел)')
 
     parser_compare = subparsers_commands.add_parser('compare', help='Сравнение двух результатов сканирования')
+    parser_compare.add_argument('-p', '--print', action='store_true', help='Вывод на экран, даже если выполняется вывод в файл (при наличии параметра -o | --output <filename>)')
+    parser_compare.add_argument('-a', '--append', action='store_true', help='Если файл результатов существует - добавить в него вместо создания нового')
+    parser_compare.add_argument('-i', '--input', nargs='+', action='extend', help='Файл с результатами сканирования. Должен указываться либо дважды при указании двух файлов, либо содержать имя каталога из которого будут взяты два последних по дате файла с маской "scan_*.txt". Если не указан - последние файлы с маской scan_*.txt в текущем каталоге')
     parser_compare.add_argument('-o', '--output', help='Файл с результатами сравнения. Если не указан - вывод в <stdout>')
+    parser_compare.add_argument('-n', '--note', help='Комментарий записываемый в файл результата')
 
-    parser_compare = subparsers_commands.add_parser('build', help='Сравнение двух результатов сканирования')
-    parser_compare.add_argument('-i', '--input', help='Файл с результатами сравнения. Если не указан - последний файл в текущем каталоге')
-    parser_compare.add_argument('-o', '--output', help='Файл с результатами сравнения. Если не указан - создать подкаталог build в текущем каталоге')
+    parser_build = subparsers_commands.add_parser('build', help='Создать установочные файлы для применения изменений')
+    parser_build.add_argument('-i', '--input', help='Файл с результатами сравнения. Если не указан - последний файл в текущем каталоге')
+    parser_build.add_argument('-o', '--output', help='Файл с результатами сравнения. Если не указан - создать подкаталог build в текущем каталоге')
 
     return parser
+
+
+def fill_advanced_hash_methods(methods) -> None:
+    for x in hashlib.algorithms_available:
+        if x not in methods:
+            methods.append(x)
+fill_advanced_hash_methods(HASH_METHODS)
+#print(HASH_METHODS); exit(0)
+
 
 
 def get_hash__from_hashlib(filename, method, block_size = 2**20):
@@ -256,7 +269,7 @@ def file_to_array(
         stop_after_sequence:str = "",           # остановиться после того как встретится эта последовательность символов
         stop_after_number:int = 0,              # остановиться прочитав это количество строк файла
         store_max_count:int = 0,                # сохранить в результат не более N строк
-        encoding:str = "utf-8"                  # кодировка файла
+        encoding:str = FILES_DEFAULT_ENCODING   # кодировка файла
 ):
     result = []
     if not os.path.isfile(filename):
@@ -494,7 +507,7 @@ def print_message(message:str, kind:str = MESSAGE_KIND__RAW, display:bool = True
         message = prepare_message(message, kind)
         if message == None:
             return # не включен режим, при котором выводить сообщения данного типа
-    if kind != MESSAGE_KIND__RAW and message[0] != COMMENT_SYMBOL:
+    if kind != MESSAGE_KIND__RAW and ((message != '' and message[0] != COMMENT_SYMBOL) or (message == '')):
         message = COMMENT_SYMBOL + " " + message
 
     if file_stream != None:
@@ -680,34 +693,38 @@ def remove_ending_symbols(s: str, removable_symbols: str) -> str:
 
 #print(os.path.join("/dir1/", "file1.txt")); exit(0)
 
-def get_output(filename, command, append):
+def get_output(filename, command, append, note):
     if filename is None:
         return None
     if filename == '':
         return None
     if filename[-1] in ['\\', '/']:
         # указан каталог, в котором создать новый файл
-        dirname = remove_ending_symbols(filename, "\\/")
-        if dirname == '':
+        filename = remove_ending_symbols(filename, "\\/")
+        if filename == '':
             # был указан корневой каталог unix-а
-            dirname = "/"
-        if not os.path.isdir(dirname):
-            os.makedirs(dirname)
-        filename_short = command + "_" + get_timestamp(None, "-", "_", "-") + ".dat"
-        filename = os.path.join(dirname, filename_short)
+            filename = "/"
+        if not os.path.isdir(filename):
+            os.makedirs(filename)
+    if os.path.isdir(filename):
+        filename_short = command + "_" + get_timestamp(None, "-", "_", "-") + DEFAULT_EXTENSION
+        filename = os.path.join(filename, filename_short)
 
     #print("!!!", filename); exit(0)
     if append:
         mode = 'at'
     else:
         mode = 'wt'
-    f = open(filename, mode)
+    f = open(filename, mode, encoding=FILES_DEFAULT_ENCODING)
     msg = '\t'
     msg += '---'
     msg  += ' [' + get_timestamp() + ']'
     msg += ' Begin ' + command
     msg += ' ---'
     print_message(msg, MESSAGE_KIND__COMMENT, False, f)
+    if not note is None and note != '':
+        print_message(note, MESSAGE_KIND__COMMENT, False, f)
+    #print("OUTPUT:", filename, f)
     return f
 
 def close_output(f, command):
@@ -843,20 +860,21 @@ def inc_date(timedelta_str, dt0 = datetime.datetime.now()):
 def prepare_arguments(args):
     if (args.print == False or args.print is None) and args.output is None:
         args.print = True
-    args._skip_before = None
-    args._skip_after = None
-    if not args.min_age is None:
-        args._skip_after = get_date_time_by_age(args.min_age)
-    if not args.max_age is None:
-        args._skip_before = get_date_time_by_age(args.max_age)
-    if not args.min_time is None:
-        d = str_to_date_time(args.min_time)
-        if not d is None:
-            args._skip_before = d
-    if not args.max_time is None:
-        d = str_to_date_time(args.max_time)
-        if not d is None:
-            args._skip_after = d
+    if args.command == 'scan':
+        args._skip_before = None
+        args._skip_after = None
+        if not args.min_age is None:
+            args._skip_after = get_date_time_by_age(args.min_age)
+        if not args.max_age is None:
+            args._skip_before = get_date_time_by_age(args.max_age)
+        if not args.min_time is None:
+            d = str_to_date_time(args.min_time)
+            if not d is None:
+                args._skip_before = d
+        if not args.max_time is None:
+            d = str_to_date_time(args.max_time)
+            if not d is None:
+                args._skip_after = d
     return args
 
 def get_skipping_items(args):
@@ -881,6 +899,108 @@ def get_skipping_items(args):
 # X = set(X)
 # print("X as set:", X)
 # exit(0)
+
+
+# --- Прочитать результаты сканирования ---
+def read_scan_results(filename:str):
+    result = {}
+    f = open(filename, 'rt', encoding=FILES_DEFAULT_ENCODING)
+    for s in f:
+        s = s.strip()
+        #s = s.lstrip() # удалить ведущие пробелы
+        #s = s.rstrip("\n") # удалить переводы строк
+        #s = s.rstrip("\r") # удалить переводы строк
+        s = remove_comment(s, COMMENT_SYMBOL)
+        if len(s) == 0:
+            continue # пустая строка
+        p = s.find("\t")
+        if p > 0:
+            # строка, где до первой табуляции - путь, а после атрибуты
+            #ab|cd
+            #01234
+            path = s[0:p]
+            attr = s[p+1:len(s)]
+            result[path] = attr
+        else:
+            # только путь без атрибутов (либо это каталог, либо для файлов атрибуты не запрашивались)
+            result[s] = ""
+    f.close()
+    return result
+
+
+def do_compare(args):
+    scan_results_dir = None
+    prev_scan_file = None
+    next_scan_file = None
+    if len(args.input) == 0:
+        # не указаны файлы с результатами сканирования, искать последние два файла в текущем каталоге
+        scan_results_dir = '.'
+    else:
+        if os.path.isdir(args.input[0]):
+            scan_results_dir = args.input[0]
+    if not scan_results_dir is None:
+        next_scan_file = get_last_file(scan_results_dir, PREFIX_SCAN, DEFAULT_EXTENSION)
+        prev_scan_file = get_last_file(scan_results_dir, PREFIX_SCAN, DEFAULT_EXTENSION, next_scan_file)
+    else:
+        prev_scan_file = args.input[0]
+        next_scan_file = args.input[1]
+    prev_scan_results = read_scan_results(prev_scan_file)
+    next_scan_results = read_scan_results(next_scan_file)
+    prev_names_list = list(prev_scan_results.keys())
+    next_names_list = list(next_scan_results.keys())
+    deleted = []
+    created = []
+    updated = []
+
+    # поиск удалённых
+    for elem in prev_names_list:
+        if elem not in next_scan_results:
+            deleted.append(elem)
+
+    # поиск созданных
+    for elem in next_names_list:
+        if elem not in prev_scan_results:
+            created.append(elem)
+
+    # поиск обновлённых
+    for elem in next_names_list:
+        if elem in prev_scan_results:
+            if next_scan_results[elem] != prev_scan_results[elem]:
+                updated.append(elem)
+
+    f = get_output(args.output, args.command, args.append, args.note)
+
+    #msg = '\t----- [{}]  Difference for "{}" and "{}" ---' . format(get_timestamp(), prev_scan_file, next_scan_file)
+    #msg = 'Difference for "{}" and "{}" ---' . format(prev_scan_file, next_scan_file)
+    msg = 'File#1 (before): "{}"' . format(prev_scan_file)
+    print_message(msg, MESSAGE_KIND__COMMENT, args.print, f)
+    msg = 'File#2 (after): "{}"' . format(next_scan_file)
+    print_message(msg, MESSAGE_KIND__COMMENT, args.print, f)
+    print_message('', MESSAGE_KIND__RAW, args.print, f)
+
+    msg = '\t--- Deleted ({}) ---' . format(len(deleted))
+    print_message(msg, MESSAGE_KIND__COMMENT, args.print, f)
+    for elem in deleted:
+        msg = 'deleted' + '\t' + elem + '\t' + prev_scan_results[elem]
+        print_message(msg, MESSAGE_KIND__RAW, args.print, f)
+    print_message('', MESSAGE_KIND__RAW, args.print, f)
+
+    msg = '\t--- created ({}) ---' . format(len(created))
+    print_message(msg, MESSAGE_KIND__COMMENT, args.print, f)
+    for elem in created:
+        msg = 'created' + '\t' + elem + '\t' + next_scan_results[elem]
+        print_message(msg, MESSAGE_KIND__RAW, args.print, f)
+    print_message('', MESSAGE_KIND__RAW, args.print, f)
+
+    msg = '\t--- Updated ({}) ---' . format(len(updated))
+    print_message(msg, MESSAGE_KIND__COMMENT, args.print, f)
+    for elem in updated:
+        msg = 'updated' + '\t' + elem + '\t' + prev_scan_results[elem] + '\t=>\t' + next_scan_results[elem]
+        print_message(msg, MESSAGE_KIND__RAW, args.print, f)
+    print_message('\t-----', MESSAGE_KIND__COMMENT, args.print, f)
+    if f != None:
+        f.close()
+
 
 
 if __name__ == "__main__":
@@ -914,15 +1034,15 @@ if __name__ == "__main__":
         print('scan...')
         #print("output:", args.output)
         #print("dirs[]:", args.directory)
-        f = get_output(args.output, args.command, args.append)
+        f = get_output(args.output, args.command, args.append, args.note)
         #print('output:', f)
         skip = get_skipping_items(args)
         for d in args.directory:
             do_scan(d, f, args, skip, INITIAL_DEPTH)
         close_output(f, args.command)
     elif args.command == 'compare':
-        print('compare...')
-        f = get_output(args.output, args.command, args.append)
+        print('compare...')        
+        do_compare(args)
     exit(0)
 
     parser = get_parser_definiton()
