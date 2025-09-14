@@ -6,6 +6,8 @@ import os
 import datetime
 import hashlib
 import zlib
+import fnmatch
+#import re
 
 INITIAL_DEPTH = 1
 SLASH = "|"
@@ -27,10 +29,92 @@ _DEBUG_ARGS = []
 #_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--append", "--size", "/tmp", "/var"]
 #_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--size", "-T", "-H", "--follow-symlinks", "--min-size=1000", "/tmp"]
 #_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--size", "-T", "-H", "--follow-symlinks", "--min-size=1000", "--min-age", "10d", "--min-time=2025.02.01", "/tmp"]
+#_DEBUG_ARGS = [""]
+
+# убрать миллисекунды после конвертирования даты в строку: datetime.datetime.utcnow().strftime('%F %T.%f')[:-3]
+#print( datetime.datetime.now().strftime('%F %T.%f')[:-3] ); exit(0) - не работает
 
 #SKIP_DEFAULT = [
 #    ".wine/dosdevices"
 #]
+
+DEFAULT_SKIP = [
+    # --- Linux ---
+    "/proc", 
+    "/sys", 
+    "/mnt", 
+    "/media", 
+    "/run", 
+    "/var/run", 
+    "/root/.local/share/mc", 
+    "/dev/fd", 
+    "/dev/core", 
+    "/var/lib/lxcfs/proc", 
+    "/var/lib/lxcfs/cgroup", 
+    "/var/lib/lxcfs/sys/devices/system/cpu/online", 
+    "/var/lib/systemd/timesync/clock",
+    "/etc/mtab",
+    "/var/log/journal",
+
+    # --- Midnight Commander (mc) ---
+    "/root/.cache/mc/Tree",
+    "/root/.config/mc/ini",
+    
+    # --- apt install (debian) ---
+    "/etc/ld.so.cache",
+    "/var/cache/apt/pkgcache.bin",
+    "/var/cache/ldconfig/aux-cache",
+    "/var/cache/man/index.db",
+    "/var/lib/apt/extended_states",
+    "/var/lib/dpkg/lock",
+    "/var/lib/dpkg/status",
+    "/var/lib/dpkg/status-old",
+    "/var/lib/dpkg/triggers/File"
+    "/var/lib/dpkg/triggers/Lock",
+    "/var/log/dpkg.log",
+    "/var/log/apt/eipp.log.xz",
+    "/var/log/apt/history.log",
+    "/var/log/apt/term.log",
+
+    # --- apt-get update (debian-12.1) ---
+    "/root/.lesshst",
+    "/var/cache/apt/srcpkgcache.bin",
+    "/var/lib/apt/lists",
+
+    # --- dnf install (rosa) ---
+    "/var/cache/dnf/expired_repos.json",
+    "/var/cache/dnf/packages.db",
+    "/var/cache/dnf/tempfiles.json",
+    "/var/lib/dnf/history.sqlite",
+    "/var/lib/dnf/history.sqlite-shm",
+    "/var/lib/dnf/history.sqlite-wal",
+    "/var/lib/rpm/rpmdb.sqlite",
+    "/var/lib/rpm/rpmdb.sqlite-shm",
+    "/var/lib/rpm/rpmdb.sqlite-wal",
+    "/var/log/dnf.librepo.log",
+    "/var/log/dnf.log",
+    "/var/log/dnf.rpm.log",
+    "/var/log/hawkey.log",
+
+    # --- Windows ---
+    "pagefile.sys", 
+    "swapfile.sys", 
+    "DumpStack.log.tmp",
+    "NTUSER.DAT", 
+
+    "UsrClass.dat",
+    "UsrClass.dat.LOG1",
+    "ntuser.dat.LOG1",
+    "catdb",
+    "edb",
+    
+    "ntuser.dat.LOG2",
+    "DataStore.edb",	# C:\Windows\SoftwaeDistribution\DataStore\
+    "MEMORY.DMP",	    # C:\Windows\
+    "INDEX.BTR",	    # C:\Windows\System32\wbem\Repository\
+    "OBJECTS.DATA"	    # C:\Windows\System32\wbem\Repository\
+]
+
 
 def fill_advanced_hash_methods(methods) -> None:
     for x in hashlib.algorithms_available:
@@ -40,7 +124,8 @@ fill_advanced_hash_methods(HASH_METHODS)
 #print(HASH_METHODS); exit(0)
 
 
-def get_parser_definiton():
+
+def get_arg_parser_definiton():
     parser = argparse.ArgumentParser(
         prog = 'get_files_list',
         description = """Выяснение списка изменившихся файлов в ходе выполнения как
@@ -74,10 +159,16 @@ def get_parser_definiton():
     parser_scan.add_argument('--max-time', help='Файл должен быть изменён до указанной даты в формате "yyyy-mm-dd HH:MM:SS (время можно не указывать)')
     parser_scan.add_argument('--min-age', help='Файл должен существовать дольше указанного интервала (примеры: 1year, 3mn, "4 Day" - один год, 3 месяца, 4 дня)')
     parser_scan.add_argument('--max-age', help='Файл должен существовать меньше указанного интервала (примеры: 1year, 3mn, "4 Day" - один год, 3 месяца, 4 дня)')
+    parser_scan.add_argument('--skip', nargs='*', action="extend", help='Игнорировать файл или каталог соответствующий маске')
+    parser_scan.add_argument('--skip-from', nargs='*', action="extend", help='Маски игнорируемых файлов или каталогов прочитать из файла. Каждая строка файла содержит одну маску. Комментарий - #')
     parser_scan.add_argument('directory', nargs='+', help='Сканируемый каталог (можно указать несколько через пробел)')
 
     parser_compare = subparsers_commands.add_parser('compare', help='Сравнение двух результатов сканирования')
     parser_compare.add_argument('-o', '--output', help='Файл с результатами сравнения. Если не указан - вывод в <stdout>')
+
+    parser_compare = subparsers_commands.add_parser('build', help='Сравнение двух результатов сканирования')
+    parser_compare.add_argument('-i', '--input', help='Файл с результатами сравнения. Если не указан - последний файл в текущем каталоге')
+    parser_compare.add_argument('-o', '--output', help='Файл с результатами сравнения. Если не указан - создать подкаталог build в текущем каталоге')
 
     return parser
 
@@ -141,6 +232,141 @@ def get_hash(filename, method):
 
 #s1 = get_link_attr_str("/tmp/varlink"); print(s1); exit(0)
 #s1 = get_link_attr_str("/tmp/scan1b.txt"); print(s1); exit(0)
+
+
+#---------------- Удалить комментарий начнающийся с символа comment_symbol -------------
+def remove_comment(s:str, comment_sequence:str = "#") -> str:
+    p = s.find(comment_sequence)
+    if p >= 0:
+        s = s[0:p]
+    return s
+
+#print(remove_comment("str//oka", "//")); exit(0)
+#print(remove_comment("str # oka", "#")); exit(0)
+
+# --- Прочитать строки файла в массив ---
+def file_to_array(
+        filename:str,                           # имя читаемого файла
+        comment_sequence:str = "#",             # начало комментария, начисная с которого удалять до конца строки
+        strip_spaces_at_begins:bool = False,    # удалять пробельные символы в начале строк
+        strip_spaces_at_ends:bool = False,      # удалять пробельные символы в конце строк
+        skip_empty_lines:bool = True,           # пропускать пустые строки
+        begin_after_sequence:str = "",          # начать после того как встретится эта последовательность символов
+        begin_after_number:int = 0,             # начать читать строки начиная с указанной (счёт начинается с 1)
+        stop_after_sequence:str = "",           # остановиться после того как встретится эта последовательность символов
+        stop_after_number:int = 0,              # остановиться прочитав это количество строк файла
+        store_max_count:int = 0,                # сохранить в результат не более N строк
+        encoding:str = "utf-8"                  # кодировка файла
+):
+    result = []
+    if not os.path.isfile(filename):
+        return result
+    with open(filename, "rt", encoding=encoding) as f:
+        lines_count = 0
+        begin_reading = begin_after_sequence == ""
+        for s in f:
+            lines_count += 1            
+            if begin_after_number > 0 and lines_count < begin_after_number:
+                continue # начинать чтение со строки с указанным номером
+            if stop_after_number > 0 and lines_count > stop_after_number:
+                break # продолжать чтение до строки с указанным номером
+            if begin_reading and stop_after_sequence != "" and s.find(stop_after_sequence) >= 0:
+                break # прекратить чтение как только встретится эта последовательность
+            if not begin_reading and s.find(begin_after_sequence) >= 0:
+                begin_reading = True
+                if not begin_reading:
+                    continue # ещё не встретилась последовательность, начиная с которой читать файл
+            while len(s) > 0 and s[-1] in '\n\r':
+                s = s[0:len(s)-1] # удалить переводы строки в конце строки
+            s = remove_comment(s, comment_sequence) # удалить комментарии
+            if strip_spaces_at_begins:
+                s = s.lstrip() # удалить пробелы в начале
+            if strip_spaces_at_ends:
+                s = s.rstrip() # удалить пробелы в конце
+            if skip_empty_lines and len(s) == 0:
+                continue # пустая строка
+            result.append(s)
+            if store_max_count > 0 and len(result) >= store_max_count:
+                break # в результат сохранено максимальное количество строк
+    return result
+
+#lines = file_to_array("notes.txt"); print(lines); exit(0)
+#lines = file_to_array("notes.txt", stop_after_sequence="http"); print(lines); exit(0)
+#lines = file_to_array("notes.txt", begin_after_number=2, stop_after_number=3); print(lines); exit(0)
+
+# --- Получить имя файла из каталог изменявшегося позже всех (но исключая перечисленные в exclude[])---
+def get_last_file(dirname:str, startswith:str = "", endswith:str = "", exclude = []) -> str:
+    if os.path.isfile(dirname):
+        # вместо каталога указан файл - выделить путь к каталогу
+        dirname = os.path.dirname(dirname)
+    if not os.path.isdir(dirname):
+        return None
+    if type(exclude) == type("abc"):
+        # скаляр в массив из одного элемента
+        exclude = {exclude}
+    
+    """
+    # в exclude[] могут быть указаны относительные пути, добавить в этот список абсолютные
+    tmp = exclude.copy()
+    for s in exclude:
+        abspath = os.path.abspath(s)
+        if abspath != s:
+            tmp.append(abspath)
+    exclude = tmp.copy()
+    del tmp
+    """
+    
+    """
+    не выполнять при каждом вызове
+    # в exclude[] могут быть строки с полным или частичным путём к файлу - выделить только имя файла
+    tmp = []
+    for s in exclude:
+        b = os.path.basename(s)
+        if b not in tmp:
+            tmp.append(b)
+    exclude = tmp.copy()
+    del tmp
+    """
+
+    files_and_dirs = os.listdir(dirname)
+    last_file_path = None
+    last_file_time = None
+    for elem in files_and_dirs:
+        current_path = os.path.join(dirname, elem)
+        if not os.path.isfile(current_path):
+            # объект каталога не является файлом
+            continue
+        if startswith != "":
+            # указано начало имени файла
+            if not elem.startswith(startswith):
+                # имя текущего файла не начинается указанным префиксом - пропустить этот файл
+                #print("skip1", elem)
+                continue
+        if endswith != "":
+            # указано расширение файла
+            if not elem.endswith(endswith):
+                # имя текущего файла не заканчивается указанным расширением - пропустить этот файл
+                #print("skip2", elem)
+                continue
+        #print("match", elem)
+        if elem in exclude:
+            # не учитывать текущий файл (короткое имя без каталога)
+            continue
+        if current_path in exclude:
+            # не учитывать текущий файл (полный путь к файлу)
+            continue
+        current_file_time = os.path.getmtime(current_path)
+        if last_file_time is None or current_file_time > last_file_time:
+            last_file_path = current_path
+            last_file_time = current_file_time
+    return last_file_path
+
+#print(get_last_file("/tmp", "", "", "/tmp/yandex_browser_updater.log")); exit(0)
+#last_file = get_last_file("scan", "", "", "scan_2023-07-06_10-23-04.txt")
+#last_file = get_last_file("scan", "", "", ["scan_2023-07-06_10-23-04.txt", "scan\scan_2023-07-06_10-22-36.txt"])
+#print(last_file)
+#exit(0)
+
 
 def get_file_attr_str(filename, args):
     result = filename
@@ -284,7 +510,24 @@ def print_message(message:str, kind:str = MESSAGE_KIND__RAW, display:bool = True
         print(message)
 
 
-def do_scan(root_dir, file_stream, args, depth = INITIAL_DEPTH):
+# --- Находится ли имя файла или каталога в переданном списке имён и масок включающих символы * и ? ---
+def check_name_matching(checking_name:str, names_or_masks) ->bool:
+    if checking_name in names_or_masks:
+        return True
+    for mask in names_or_masks:
+        if '*' in mask or '?' in mask:
+            if fnmatch.fnmatch(checking_name, mask):
+                return True
+    return False
+
+#print(check_for_skipping("file123.txt", ["file.txt", "file???.tx?"])); exit(0)
+
+#print(os.path.isfile("/home/alexey/bin/1.sh")); exit(0)
+#print(os.path.isfile("/home/alexey/bin/2.sh")); exit(0)
+#print(os.path.isfile("/sources")); exit(0)
+#print(os.path.islink("/sources")); exit(0)
+
+def do_scan(root_dir, file_stream, args, skip, depth):
     if depth == INITIAL_DEPTH:
         print('begin scan [{}]' . format(root_dir))
     try:
@@ -296,10 +539,18 @@ def do_scan(root_dir, file_stream, args, depth = INITIAL_DEPTH):
     # +++ обработка файлов root_dir +++
     for one_item in items:
         path = os.path.join(root_dir, one_item)
+        if not os.path.isfile(path):
+            continue # объект не является файлом
+        if check_name_matching(one_item, skip):
+            continue # имя объекта находится в списке игнорируемых объектов
+        if check_name_matching(path, skip):
+            continue # имя объекта находится в списке игнорируемых объектов
         if os.path.islink(path):
+            # символическая ссылка
             line = path + '\t' + '=>' + '\t' + os.path.realpath(path)
             print_message(line, MESSAGE_KIND__RAW, args.print, file_stream)
-        elif  os.path.isfile(path):
+        else:
+            # файл
             line = get_file_attr_str(path, args)
             if not line is None:
                 print_message(line, MESSAGE_KIND__RAW, args.print, file_stream)
@@ -307,21 +558,145 @@ def do_scan(root_dir, file_stream, args, depth = INITIAL_DEPTH):
     # +++ обработка каталогов root_dir +++
     for one_item in items:
         path = os.path.join(root_dir, one_item)
-        if os.path.isdir(path):
-            if os.path.islink(path) and not args.follow_symlinks:
-                # ссылка на каталог и не включен переход по ссылкам - пропустить
-                continue
-            path += SLASH
-            print_message(path, MESSAGE_KIND__RAW, args.print, file_stream)
-            if args.max_depth == 0 or depth < args.max_depth:
-                do_scan(path, file_stream, args, depth+1)
+        if not os.path.isdir(path):
+            continue # объект не является каталогом
+        if check_name_matching(one_item, skip):
+            continue # имя объекта находится в списке игнорируемых объектов
+        if check_name_matching(path, skip):
+            continue # имя объекта находится в списке игнорируемых объектов
+
+        if os.path.islink(path) and not args.follow_symlinks:
+            # ссылка на каталог и не включен переход по ссылкам - пропустить
+            continue
+        path += SLASH
+        print_message(path, MESSAGE_KIND__RAW, args.print, file_stream)
+        if args.max_depth is None or args.max_depth == 0 or depth < args.max_depth:
+            do_scan(path, file_stream, args, skip, depth+1)
 
 
-def get_output(filename, append, command):
+def inc_month(initial_date_time:datetime, months_count:int) -> datetime:
+    #print(initial_date_time, "months_count=", months_count)
+    if months_count > 0:
+        sign = +1
+    elif months_count < 0:
+        sign = -1
+    else:
+        return initial_date_time
+    months_count = abs(months_count)
+    year    = initial_date_time.year
+    month   = initial_date_time.month
+    day     = initial_date_time.day
+    hour    = initial_date_time.hour
+    minute  = initial_date_time.minute
+    second  = initial_date_time.second
+    #print(year, month, day, hour, minute, second)
+    # 14: 14/12=1 | 2
+    if abs(months_count) > 12:
+        inc_years = int(months_count / 12)
+        inner_months = months_count % 12
+    else:
+        inc_years = 0
+        inner_months = months_count
+    #print(sign, inc_years, inner_months)
+    year += sign*inc_years
+    month += sign*inner_months
+    if month > 12:
+        year +=1 
+        month = month - 12
+    elif month < 1:
+        year -= 1
+        month = month + 12
+    #print(year, month, day, hour, minute, second)
+    target_date_time = None
+    try:
+        target_date_time = datetime.datetime(year, month, day, hour, minute, second)
+    except:
+        target_date_time = None
+    if target_date_time is None:
+        # не получилось изменить месяц, вероятно, потому что попали на числа, которых нет в целевом месяце (например, 31 февравля) - отбросить дни месяца
+        try:
+            target_date_time = datetime.datetime(year, month, 1, hour, minute, second)
+        except:
+            return None # не должно возникать
+    
+    return target_date_time
+    
+#print(inc_month(datetime.datetime.now(), -3)); exit(0)
+#print(inc_month(datetime.datetime.now(), -14)); exit(0)
+#print(inc_month(datetime.datetime(2025, 2, 28, 12,12,12, 1), -14)); exit(0)
+#print(inc_month(datetime.datetime.now(), 4)); exit(0)
+#print(inc_month(datetime.datetime.now(), -14)); exit(0)
+#print(inc_month(datetime.datetime(2025, 12, 31, 12,12,12, 1), 14)); exit(0)
+
+def inc_year(initial_date_time:datetime, years_count:int) -> datetime:
+    return inc_month(initial_date_time, 12*years_count)
+
+#print(inc_year(datetime.datetime.now(), -10)); exit(0)
+
+def get_date_time_by_age(age_str: str) -> datetime:
+    age_str = age_str.lower()
+    age_value = ""
+    age_measure = ""
+    i = len(age_str) - 1
+    while i >= 0 and age_str[i] not in "0123456789":
+        i -= 1
+    age_value = age_str[0:i+1]
+    age_value = age_value.strip()
+    age_measure = age_str[i+1:len(age_str)]
+    age_measure = age_measure.strip()
+    try:
+        age_value_int = int(age_value)
+    except:
+        return None
+    measure_multiplicator = 1
+    target_date_time = None
+    if len(age_measure) > 0:
+        # указана единица измерения (если не указана - секунды)
+        if age_measure in ["s", "sec", "second", "seconds"]:
+            measure_multiplicator = 1
+        if age_measure in ["m", "min", "mins", "minute", "minutes"]:
+            measure_multiplicator = 60
+        elif age_measure in ["h", "hour", "hours"]:
+            measure_multiplicator = 3600
+        elif age_measure in ["d", "day", "days"]:
+            measure_multiplicator = 86400
+        elif age_measure in ["w", "week", "weeks"]:
+            measure_multiplicator = 432000
+        elif age_measure in ["mn", "mon", "month", "months"]:
+            target_date_time = inc_month(datetime.datetime.now(), -age_value_int)
+        elif age_measure in ["y", "year", "years"]:
+            target_date_time = inc_year(datetime.datetime.now(), -age_value_int)
+    if target_date_time is None:
+        target_date_time = datetime.datetime.now() - datetime.timedelta(seconds=measure_multiplicator*age_value_int)
+    return target_date_time
+
+#print(get_date_time_by_age("15 month")); exit(0)
+
+
+def remove_ending_symbols(s: str, removable_symbols: str) -> str:
+    while len(s) > 0 and s[-1] in removable_symbols:
+        s = s[0:len(s)-1]
+    return s
+
+#print(os.path.join("/dir1/", "file1.txt")); exit(0)
+
+def get_output(filename, command, append):
     if filename is None:
         return None
     if filename == '':
         return None
+    if filename[-1] in ['\\', '/']:
+        # указан каталог, в котором создать новый файл
+        dirname = remove_ending_symbols(filename, "\\/")
+        if dirname == '':
+            # был указан корневой каталог unix-а
+            dirname = "/"
+        if not os.path.isdir(dirname):
+            os.makedirs(dirname)
+        filename_short = command + "_" + get_timestamp(None, "-", "_", "-") + ".dat"
+        filename = os.path.join(dirname, filename_short)
+
+    #print("!!!", filename); exit(0)
     if append:
         mode = 'at'
     else:
@@ -342,6 +717,7 @@ def close_output(f, command):
     msg += ' Complete ' + command
     msg += ' ---'
     print_message(msg, MESSAGE_KIND__COMMENT, False, f)
+    f.close()
 
 
 def age_one_measure(age, measure):
@@ -354,7 +730,7 @@ def age_one_measure(age, measure):
 
 
 # Из строки вида <dd.mm.yyyy[ hh:mm:ss]> или <yyyy.mm.dd[ hh:mm:ss]> получить дату; если недопустимый формат - вернуть None
-def str_to_date(s):
+def str_to_date_time(s:str) ->datetime:
     year = None
     month = None
     day = None
@@ -393,11 +769,11 @@ def str_to_date(s):
         return None
     return result
     
-#d1 = str_to_date("31.12.2012 08:11:59"); print(d1); exit(0)
-#d1 = str_to_date("2012-12-31 09:11:59"); print(d1); exit(0)
-#d1 = str_to_date("2012-02-31 09:11:59"); print(d1); exit(0)
+#d1 = str_to_date_time("31.12.2012 08:11:59"); print(d1); exit(0)
+#d1 = str_to_date_time("2012-12-31 09:11:59"); print(d1); exit(0)
+#d1 = str_to_date_time("2012-02-31 09:11:59"); print(d1); exit(0)
 
-
+"""
 # ----- В объекте типа datetime.datetime изменить месяц -----
 def inc_months(sourcedate, months):
     import calendar
@@ -406,7 +782,9 @@ def inc_months(sourcedate, months):
     month = month % 12 + 1
     day = min(sourcedate.day, calendar.monthrange(year, month)[1])
     return datetime.datetime(year, month, day, sourcedate.hour, sourcedate.minute, sourcedate.second, sourcedate.microsecond)
+"""
 
+"""
 # ----- Изменение даты заданое строкой вида "-10year",  "5 Hours", "-86400" (количество секунд в сутках) -----
 def inc_date(timedelta_str, dt0 = datetime.datetime.now()):
     timedelta_measure = ''
@@ -460,7 +838,7 @@ def inc_date(timedelta_str, dt0 = datetime.datetime.now()):
 #print(inc_date('1440 mins')); exit(0)
 #print(inc_date('-60 seconds')); exit(0)
 #print(inc_date(' 60 ')); exit(0)
-
+"""
     
 def prepare_arguments(args):
     if (args.print == False or args.print is None) and args.output is None:
@@ -468,27 +846,52 @@ def prepare_arguments(args):
     args._skip_before = None
     args._skip_after = None
     if not args.min_age is None:
-        args._skip_after = inc_date('-' + args.min_age)
+        args._skip_after = get_date_time_by_age(args.min_age)
     if not args.max_age is None:
-        args._skip_before = inc_date('-' + args.max_age)
+        args._skip_before = get_date_time_by_age(args.max_age)
     if not args.min_time is None:
-        d = str_to_date(args.min_time)
+        d = str_to_date_time(args.min_time)
         if not d is None:
             args._skip_before = d
     if not args.max_time is None:
-        d = str_to_date(args.max_time)
+        d = str_to_date_time(args.max_time)
         if not d is None:
             args._skip_after = d
     return args
 
+def get_skipping_items(args):
+    skip = DEFAULT_SKIP.copy()
+
+    # добавить отдельные маски перечисленные в параметрах --skip
+    for elem in args.skip:        
+        skip.append(elem)
+
+    # добавить маски перечисленные в файлах указанных в параметрах --skip-from
+    for elem in args.skip_from:
+        skip_from = file_to_array(elem)
+        skip += skip_from
+
+    skip = set(skip)
+    #print(skip); exit(0)
+    return skip
+
+# X = ["aaa", "AAA", "a1", "a2", "aaa", "", "BBB"]
+# Y = ["bbb", "BBB"]
+# X += Y;  print("X as array:", X)
+# X = set(X)
+# print("X as set:", X)
+# exit(0)
+
+
 if __name__ == "__main__":
+    #print("argv:", sys.argv); exit(0)
     #f1();exit(0)
     #parser = f2a()
     if os.path.isfile('/etc/passwd'):
         SLASH = '/'
     else:
         SLASH = '\\'
-    parser = get_parser_definiton()
+    parser = get_arg_parser_definiton()
     #print(parser)
     if len(_DEBUG_ARGS) > 0:
         # использовать отладочные параметры
@@ -502,21 +905,24 @@ if __name__ == "__main__":
         args = parser.parse_args()
 
     args = prepare_arguments(args)
-    #print("args:", args); exit(0)
+    print("args:", args); #exit(0)
 
     if args.command == 'help':
         print('help...')
+        parser.print_help()
     elif args.command == 'scan':
         print('scan...')
         #print("output:", args.output)
         #print("dirs[]:", args.directory)
-        f = get_output(args.output, args.append, args.command)
-        print('output:', f)
+        f = get_output(args.output, args.command, args.append)
+        #print('output:', f)
+        skip = get_skipping_items(args)
         for d in args.directory:
-            do_scan(d, f, args)
+            do_scan(d, f, args, skip, INITIAL_DEPTH)
         close_output(f, args.command)
     elif args.command == 'compare':
         print('compare...')
+        f = get_output(args.output, args.command, args.append)
     exit(0)
 
     parser = get_parser_definiton()
