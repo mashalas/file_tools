@@ -10,8 +10,12 @@ import fnmatch
 #import glob
 
 HASH_METHODS = ['crc32', 'md5', 'sha256', 'sha512', 'sha384', 'sha1']
-HASH_OPEN_DELIMITER = "["
-HASH_CLOSE_DELIMITER = "]"
+HASH_OPEN_DELIMITER = "("
+HASH_CLOSE_DELIMITER = ")"
+
+POSITION__DIRNAME = 0
+POSITION__FILE_SHORT_NAME = 1
+POSITION__FILE_EXTENSION = 2
 
 _DEBUG_ARGS = []
 #_DEBUG_ARGS = ["--name", "--pattern", "*.txt", "-m", "./dir1"]
@@ -21,7 +25,7 @@ _DEBUG_ARGS = []
 
 #----- Разделить путь к файлу на каталог, имя без расширения и расширение -----
 # (расширение - последние символы начиная с последней точки)
-def split_filename_to_dir_name_extension(path):
+def split_file_path(path):
     last_dot_position = -1
     last_slash_position = -1
     for i in range(len(path)-1, -1, -1):
@@ -43,13 +47,13 @@ def split_filename_to_dir_name_extension(path):
     extension = path[last_dot_position:len(path)]
     return dir, name, extension
 
-#print(split_filename_to_dir_name_extension("c:\\temp\\file1.2025.txt")); exit(0)
-#print(split_filename_to_dir_name_extension("c:\\temp\\file1.txt")); exit(0)
-#print(split_filename_to_dir_name_extension("c:\\temp\\file1")); exit(0)
-#print(split_filename_to_dir_name_extension("file.zip")); exit(0)
-#print(split_filename_to_dir_name_extension("/tmp/file.zip")); exit(0)
-#print(split_filename_to_dir_name_extension("/file.zip")); exit(0)
-#print(split_filename_to_dir_name_extension("qwe")); exit(0)
+#print(split_file_path("c:\\temp\\file1.2025.txt")); exit(0)
+#print(split_file_path("c:\\temp\\file1.txt")); exit(0)
+#print(split_file_path("c:\\temp\\file1")); exit(0)
+#print(split_file_path("file.zip")); exit(0)
+#print(split_file_path("/tmp/file.zip")); exit(0)
+#print(split_file_path("/file.zip")); exit(0)
+#print(split_file_path("qwe")); exit(0)
 
 
 def get_hash__crc32(filename):
@@ -117,37 +121,36 @@ def remove_ending_symbols(s, removing_symbols):
 #print(remove_leading_symbols(",,-,abc,.,", ",.?")); exit(0)
 
 
-def build_dst_file_name(src_file_name, dst_dir, algo:str, print_algo_name:bool):
-    if not os.path.isfile(src_file_name):
-        return None
-    hash = get_hash(src_file_name, algo)
-    src_dir, src_name, src_extension = split_filename_to_dir_name_extension(src_file_name)
-    if dst_dir is None or dst_dir == '':
-        # целевой каталог не указан - файл остаётся в исходном каталоге
-        dst_dir = remove_ending_symbols(src_dir, '\\/')
-    if print_algo_name:
-        # перед хешем поставить имя алгоритма
-        algo_name = algo + '='
-    else:
-        # имя алгоритма не писать, только сам хеш
-        algo_name = ''
-    target_file_name = src_name + \
-        HASH_OPEN_DELIMITER + algo_name + hash + HASH_CLOSE_DELIMITER + \
-        src_extension
-    result = os.path.join(dst_dir, target_file_name)
-    return result
+def build_dst_file_name(src, dst, args):
+    src_path_parts = split_file_path(src)
 
+    hash = get_hash(src, args.algo)
+    dst_file_short_name = src_path_parts[POSITION__FILE_SHORT_NAME]
+    dst_file_short_name += HASH_OPEN_DELIMITER
+    dst_file_short_name += args.algo + '='
+    dst_file_short_name += hash
+    dst_file_short_name += HASH_CLOSE_DELIMITER
+    dst_file_short_name += src_path_parts[POSITION__FILE_EXTENSION]
+
+    if dst is None:
+        # оставить файл в исходном каталоге
+        result = os.path.join(src_path_parts[POSITION__DIRNAME], dst_file_short_name)
+    else:
+        # скопировать/переместить файл в каталог dst
+        result = os.path.join(dst, dst_file_short_name)
+    return result
 
 def hashcopy(src, dst, args):
     #print(src, dst)
     if not dst is None:
         if not os.path.exists(dst):
-            os.makedirs(dst)
+            if not args.dry_run:
+                os.makedirs(dst)
         elif os.path.isfile(dst):
             msg = 'Destination "{}" already exists and it is not directory' . format(dst)
             raise Exception(msg)
     if os.path.isdir(src):
-        # источник - каталог
+        # +++ источник - каталог +++
         items = os.listdir(src)
         #print(items)
         for one_item in items:
@@ -166,15 +169,31 @@ def hashcopy(src, dst, args):
                     dst_next = os.path.join(dst_next, one_item)
                 hashcopy(path, dst_next, args)
     elif os.path.isfile(src):
-        # источник - файл
-        dst_file_name = build_dst_file_name(src, dst, args.algo, args.name)
-        if args.move:
-            os.rename(src, dst_file_name)
+        # +++ источник - файл +++
+        dst_file_name = build_dst_file_name(src, dst, args)
+        if args.verbose:
+            if args.move:
+                msg = "move"
+            else:
+                msg = "copy"
+            msg += '  "{}"  =>  "{}"' . format(src, dst_file_name)
+            print(msg)
+        if os.path.isfile(dst_file_name):
+            # файл уже существует
+            if args.verbose:
+                msg = "  already exists"
+                print(msg)
         else:
-            shutil.copyfile(src, dst_file_name, follow_symlinks=True)
-            shutil.copystat(src, dst_file_name, follow_symlinks=True) # скопировать мета-информацию о файле (время правки и т.д.)
+            if not args.dry_run:
+                # реально выполнять действия с файлами
+                if args.move:
+                    os.rename(src, dst_file_name)
+                else:
+                    shutil.copyfile(src, dst_file_name, follow_symlinks=True)
+                    shutil.copystat(src, dst_file_name, follow_symlinks=True) # скопировать мета-информацию о файле (время правки и т.д.)
     else:
         print('Source "{}" not exists' . format(src))
+
 
 
 def get_arg_parser_definiton():
@@ -184,16 +203,21 @@ def get_arg_parser_definiton():
         ''',
         formatter_class=argparse.RawTextHelpFormatter
     )
-    parser.add_argument('-a', '--algo', default=HASH_METHODS[0], help='Алгоритм вычисления контрольных сумм. По умолчанию: ' + HASH_METHODS[0] + '; возможные варианты: ' + ', '.join(HASH_METHODS))
-    parser.add_argument('-n', '--name', action='store_true', help='Помещать перед хешем имя алгоритма хеширования')
     parser.add_argument('-m', '--move', action='store_true', help='Перемещать файлы, а не копировать')
+    parser.add_argument('-d', '--dry-run', action='store_true', help='Не выполнять копирование/перемещение, а только вывести какие файлы под какими новыми именами будут скопированы (как в verbose-режиме)')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Сообщать какие файла под какими новыми именами будут скопированы')
     parser.add_argument('-r', '--recursive', action='store_true', help='рекурсивный обход каталогов')
-    parser.add_argument('-p', '--pattern', help='если в качестве источника указан каталог, в этом параметре можно задать маску файлов с использованием символов подстановки "*" и "?"')
+    parser.add_argument('-a', '--algo', default=HASH_METHODS[0], help='Алгоритм вычисления контрольных сумм. По умолчанию: ' + HASH_METHODS[0] + '; возможные варианты: ' + ', '.join(HASH_METHODS))
+    parser.add_argument('-p', '--pattern', help='если в качестве источника указан каталог, в этом параметре можно задать маску файлов с использованием символов подстановки "*" и "?". Чтобы')
 
-    parser.add_argument('src', nargs=1, help='Исходный файл, каталог или маска файлов в каталоге')
-    parser.add_argument('dst', nargs='?', help='Целевой файл или каталог')
+    parser.add_argument('src', nargs=1, help='Исходный файл или каталог')
+    parser.add_argument('dst', nargs='?', help='Целевой каталог')
 
     return parser
+
+def check_arguments(args):
+    if args.dry_run:
+        args.verbose = True
 
 
 if __name__ == "__main__":
@@ -204,5 +228,6 @@ if __name__ == "__main__":
     else:
         # использовать реальные параметры командной строки
         args = parser.parse_args()
-    #print("args:", args); #exit(0)
+    check_arguments(args)
+    print("args:", args); #exit(0)
     hashcopy(args.src[0], args.dst, args)
