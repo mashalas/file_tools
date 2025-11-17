@@ -92,9 +92,7 @@ def help():
     print('print_hash.py <file|dir|mask>')
     print('Calculate hash-sum for file, directory with subdirectories or files matched with mask')
     print('By default calculates crc32. Another algorithm cat be specified in environment variable "HASH_ALGO".')
-    algorithms = ['crc32']
-    algorithms += HASHLIB_ALOGORITHMS
-    algorithms_str = ', '.join(algorithms)
+    algorithms_str = ', '.join(ALL_AVAILABLE_ALGORITHMS)
     print('Available algorithms:', algorithms_str)
 
 if __name__ == '__main__':
