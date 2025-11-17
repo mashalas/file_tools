@@ -111,13 +111,10 @@ def print_hash(path, algo_list, hash_split):
             print_hash(next_path, algo_list, hash_split)
     elif os.path.isfile(path):
         # указан файл
-        msg = path
+        msg = ''
         for a in algo_list:
-            msg += '\t' + get_hash(path, a, hash_split)
-            #one_hash = get_hash(path, a)
-            #if a == 'crc32' and len(one_hash) > 2:
-            #    one_hash = 
-            #msg += '\t' + one_hash
+            msg += get_hash(path, a, hash_split) + '\t'
+        msg += path
         print(msg)
     
 
@@ -155,9 +152,10 @@ if __name__ == '__main__':
             hash_split = 0
     
     # --- заголовок: имя файла и названия алгоритмов
-    msg = 'filename'
+    msg = ''
     for a in algo_list:
-        msg += '\t' + a
+        msg += a + '\t'
+    msg += 'filename'
     print(msg)
 
     for i in range(1, len(sys.argv)):
