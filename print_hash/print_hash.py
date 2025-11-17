@@ -12,6 +12,8 @@ HASHLIB_ALOGORITHMS.remove('shake_256')
 HASHLIB_ALOGORITHMS = list(HASHLIB_ALOGORITHMS) # чтобы можно было сортировать
 HASHLIB_ALOGORITHMS.sort()
 
+ALL_AVAILABLE_ALGORITHMS = ['crc32']
+ALL_AVAILABLE_ALGORITHMS += HASHLIB_ALOGORITHMS
 
 def get_hash__crc32(filename):
     result = ''
@@ -65,24 +67,25 @@ def get_hash(filename, algo):
     return result
 
 
-def print_hash(path, algo):
-    prefix = ''
+def print_hash(path, algo_list):
     if path.find('*') >= 0 or path.find('?') >= 0:
         # указана маска файлов
         items = glob.glob(path)
         for one_item in items:
             next_path = os.path.join(os.path.curdir, one_item)
-            print_hash(next_path, algo)
+            print_hash(next_path, algo_list)
     elif os.path.isdir(path):
         # указан каталог
         items = os.listdir(path)
         for one_item in items:
             next_path = os.path.join(path, one_item)
-            print_hash(next_path, algo)
+            print_hash(next_path, algo_list)
     elif os.path.isfile(path):
         # указан файл
-        hash_value = get_hash(path, algo)
-        print('{}{}  {}' . format(prefix, hash_value, path))
+        msg = path
+        for a in algo_list:
+            msg += '\t' + get_hash(path, a)
+        print(msg)
     
 
 def help():
@@ -102,8 +105,20 @@ if __name__ == '__main__':
     if sys.argv[1] in ('-h', '--help', '-help', '/?', '-?'):
         help()
         exit(0)
-    algo = os.environ.get('HASH_ALGO')
-    if algo == None:
-        algo = DEFAULT_HASH_ALGORITHM
+    algo_str = os.environ.get('HASH_ALGO')
+    if algo_str == None:
+        algo_str = DEFAULT_HASH_ALGORITHM
+    algo_str = algo_str.replace(',', ' ')
+    algo_list = algo_str.split(' ')
+    algo_list = list(filter(None, algo_list)) # удалить пустые элементы
+    algo_list = [a for a in algo_list if a in ALL_AVAILABLE_ALGORITHMS] # оставить только допустимые значения
+    #print(algo_list); exit(0)
+    
+    # --- заголовок: имя файла и названия алгоритмов
+    msg = 'filename'
+    for a in algo_list:
+        msg += '\t' + a
+    print(msg)
+
     for i in range(1, len(sys.argv)):
-        print_hash(sys.argv[i], algo)
+        print_hash(sys.argv[i], algo_list)
