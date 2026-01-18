@@ -7,17 +7,22 @@ import datetime
 import hashlib
 import zlib
 import fnmatch
+import shutil
 #import re
 
+
 INITIAL_DEPTH = 1
+SLASHES = '\\/'
 SLASH = "|"
-HASH_METHODS = ['crc32', 'md5', 'crc32', 'sha256', 'sha512', 'sha384', 'sha1']
+HASH_METHODS = ['crc32', 'md5', 'sha256', 'sha512', 'sha384', 'sha1']
 DEFAULT_HASH_METHOD = HASH_METHODS[0]
 FILES_DEFAULT_ENCODING = 'utf-8'
 
+#MESSAGE_KIND__LOG = "l"
+#MESSAGE_KIND__VERBOSE = "i"
 MESSAGE_KIND__COMMENT = "c"
-MESSAGE_KIND__VERBOSE = "i"
 MESSAGE_KIND__DEBUG = "d"
+MESSAGE_KIND__INFO = "i"
 MESSAGE_KIND__WARNING = "w"
 MESSAGE_KIND__ERROR = "e"
 MESSAGE_KIND__FATAL = "f"
@@ -25,22 +30,38 @@ MESSAGE_KIND__QUESTION = "q"
 MESSAGE_KIND__RAW = "r"
 COMMENT_SYMBOL = "#"
 
+_sn = 0
+LOGGING_LEVEL__ALL = _sn; _sn += 1          # 0
+LOGGING_LEVEL__DEBUG = _sn; _sn += 1        # 1
+LOGGING_LEVEL__INFO = _sn; _sn += 1         # 2
+LOGGING_LEVEL__WARNING = _sn; _sn += 1      # 3
+LOGGING_LEVEL__ERROR = _sn; _sn += 1        # 4
+LOGGING_LEVEL__FATAL = _sn; _sn += 1        # 5
+LOGGING_LEVEL__OFF = _sn; _sn += 1          # 6
+LOGGING_LEVEL = LOGGING_LEVEL__WARNING
+
 PREFIX_SCAN = "scan_"
 PREFIX_COMPARE = "compare_"
 PREFIX_BUILD = "build_"
 DEFAULT_EXTENSION = ".txt"
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 _DEBUG_ARGS = []
-#_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--append", "--size", "/tmp", "/var"]
-#_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--size", "-T", "-H", "--follow-symlinks", "--min-size=1000", "/tmp"]
-#_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--size", "-T", "-H", "--follow-symlinks", "--min-size=1000", "--min-age", "10d", "--min-time=2025.02.01", "/tmp"]
-#_DEBUG_ARGS = ["compare", "--input", "/home/alexey/bin/scan/results1", "-o", "/home/alexey/bin/compare/results/"]
+if DEBUG_MODE:
+    #_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan2.txt", "--append", "--size", "/tmp", "/var"]
+    #_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--size", "-T", "-H", "--follow-symlinks", "--min-size=1000", "/tmp"]
+    #_DEBUG_ARGS = ["scan",  "-o", "/tmp/scan1.txt", "--size", "-T", "-H", "--follow-symlinks", "--min-size=1000", "--min-age", "10d", "--min-time=2025.02.01", "/tmp"]
+    #_DEBUG_ARGS = ["compare", "--input", "/home/alexey/bin/scan/results1", "-o", "/home/alexey/bin/compare/results/"]
+    #_DEBUG_ARGS = ["compare", "--input", "/tmp/scan1.txt", "--input", "/tmp/scan2.txt", "-o", "/tmp/compare_results/"]
+    #_DEBUG_ARGS = ["compare", "--input=./scan_results/", "--output=./compare_results/"]
+    #_DEBUG_ARGS = ["build", "--input=./compare_results", "--output=./build/"]
+    _DEBUG_ARGS = ["build", "--input=compare_results", "--output=build/", '--note="Текст для Комментария"']
+    pass
 
 
 
 # убрать миллисекунды после конвертирования даты в строку: datetime.datetime.utcnow().strftime('%F %T.%f')[:-3]
-#print( datetime.datetime.now().strftime('%F %T.%f')[:-3] ); exit(0) - не работает
+#print( datetime.datetime.now().strftime('%F %T.%f')[:-3] ); exit(0) # - не работает
 
 #SKIP_DEFAULT = [
 #    ".wine/dosdevices"
@@ -127,12 +148,12 @@ DEFAULT_SKIP = [
 def get_arg_parser_definiton():
     parser = argparse.ArgumentParser(
         prog = 'get_files_list',
-        description = """Выяснение списка изменившихся файлов в ходе выполнения как
-1) Составить список файлов до установки или настройки программы (состояние "А");
+        description = """Выяснение списка изменившихся файлов в ходе выполнения каких-либо действий на компьютере, например, установки или настройки программы.
+1) Составить список файлов до установки или настройки программы (состояние "А") - команда "scan";
 2) Произвести установку или настройку программы;
-3) Составить список файлов (состояние "Б");
-4) Сравнить два списка файлов, результаты записать в файл различий;
-5) На основе файла различий собрать установочный пакет приводящий систему из состояния "А" в состояние "Б".""",
+3) Составить список файлов (состояние "Б") - команда "scan";
+4) Сравнить два списка файлов, результаты записать в файл различий - команда "compare";
+5) На основе файла различий собрать установочный пакет приводящий систему из состояния "А" в состояние "Б" - команда "build".""",
         formatter_class=argparse.RawTextHelpFormatter
     )
 
@@ -171,8 +192,9 @@ def get_arg_parser_definiton():
     parser_compare.add_argument('-n', '--note', help='Комментарий записываемый в файл результата')
 
     parser_build = subparsers_commands.add_parser('build', help='Создать установочные файлы для применения изменений')
-    parser_build.add_argument('-i', '--input', help='Файл с результатами сравнения. Если не указан - последний файл в текущем каталоге')
-    parser_build.add_argument('-o', '--output', help='Файл с результатами сравнения. Если не указан - создать подкаталог build в текущем каталоге')
+    parser_build.add_argument('-i', '--input', help='Файл с результатами сравнения. Если не указан - последний файл в текущем каталоге. Если каталог - последний файл из каталога')
+    parser_build.add_argument('-o', '--output', help='Каталог, в котором создать файлы для воспроизведения изменений. Если не указан - создать подкаталог build в текущем каталоге')
+    parser_build.add_argument('-n', '--note', help='Комментарий записываемый в файл результата')
 
     return parser
 
@@ -218,7 +240,7 @@ def get_hash__crc32(filename):
 
 
 def get_hash(filename, method):
-    result = ""
+    result = ''
     if not os.path.isfile(filename):
         return result
     if method == 'crc32':
@@ -226,7 +248,7 @@ def get_hash(filename, method):
         result = get_hash__crc32(filename)
     elif method in hashlib.algorithms_available:
         # +++ алгоритмы из hashlib +++
-        BLOCK_SIZE = 2**2        
+        BLOCK_SIZE = 2**20
         method_hashlib = hashlib.new(method)
         result = get_hash__from_hashlib(filename, method_hashlib, BLOCK_SIZE)
     else:
@@ -247,8 +269,27 @@ def get_hash(filename, method):
 #s1 = get_link_attr_str("/tmp/scan1b.txt"); print(s1); exit(0)
 
 
-#---------------- Удалить комментарий начнающийся с символа comment_symbol -------------
-def remove_comment(s:str, comment_sequence:str = "#") -> str:
+def file_to_array__simple(filename, comment_sequence = '', skip_empty_lines = False):
+    result = []
+    with open(filename, "rt") as f:
+        for s in f:
+            s = s.strip()
+            if len(comment_sequence) > 0:
+                # удалить однострочные комментарии
+                p = s.find(comment_sequence)
+                if p >= 0:
+                    s = s[0:p]
+            if len(s) == 0 and skip_empty_lines:
+                continue # пустая строка
+            result.append(s)
+    return result
+
+#lines = file_to_array("/etc/fstab", '#', True); from pprint import pprint;  pprint(lines); exit(0)
+
+#print("abc".replace("b", "BB")); exit(0)
+
+#---------------- Удалить комментарий начнающийся с comment_sequence -------------
+def remove_comment(s:str, comment_sequence:str = COMMENT_SYMBOL) -> str:
     p = s.find(comment_sequence)
     if p >= 0:
         s = s[0:p]
@@ -257,58 +298,171 @@ def remove_comment(s:str, comment_sequence:str = "#") -> str:
 #print(remove_comment("str//oka", "//")); exit(0)
 #print(remove_comment("str # oka", "#")); exit(0)
 
+def scalar_to_tuple(x):
+    if type(x) == type(()):
+        return x # уже является кортежом
+    if type(x) == type([]):
+        return x # уже является списком
+    if x is None:
+        return () # None заменить на пустой кортёж
+    return (x, )
+
+#x = 123.456; y = scalar_to_tuple(x); print(type(y)); print(len(y)); print(y); exit(0)
+#x = None; y = scalar_to_tuple(x); print(type(y)); print(len(y)); print(y); exit(0)
+
 # --- Прочитать строки файла в массив ---
 def file_to_array(
         filename:str,                           # имя читаемого файла
-        comment_sequence:str = "#",             # начало комментария, начисная с которого удалять до конца строки
+        comment_sequence:str = '',              # начало однострочного комментария, начиная с которого удалять до конца строки
         strip_spaces_at_begins:bool = False,    # удалять пробельные символы в начале строк
         strip_spaces_at_ends:bool = False,      # удалять пробельные символы в конце строк
-        skip_empty_lines:bool = True,           # пропускать пустые строки
-        begin_after_sequence:str = "",          # начать после того как встретится эта последовательность символов
-        begin_after_number:int = 0,             # начать читать строки начиная с указанной (счёт начинается с 1)
-        stop_after_sequence:str = "",           # остановиться после того как встретится эта последовательность символов
-        stop_after_number:int = 0,              # остановиться прочитав это количество строк файла
-        store_max_count:int = 0,                # сохранить в результат не более N строк
+        replaces = {},                          # выполнить замены (ключ - что искать, значение - на что заменить)
+        ignore_empty:bool = False,              # пропускать пустые строки          ignore_... ?
+
+        max_count:int = -1,                     # сохранить в результат не более N строк
+        max_length:int = -1,                    # максимальная длина каждой строки (после удаления пробелов, комментариев и всех трансформаций)
+        numerate_lines_since = 0,               # нумеровать строки с этого значения (обычно 0 или 1, но можно и другое)
+
+        accept_while = (),      # принимать только строки содержащие эти последовательности символов или находящиеся в строках файла этими номерами
+        accept_since = (),      # начать принимать строки, когда встретится указанная последовательность или начиная с указаной строки файла
+        accept_after = (),      # начать принимать следующие строки, когда встретится указанная последовательность или начиная с указаной строки файла
+
+        ignore_while = (),      # пропускать строки содержащие эти последовательности символов или находящиеся в строках файла этими номерами
+        ignore_since = (),
+        ignore_after = (),
+
+        break_at = (),          # немедленно остановить чтение файла, текущая строка не добавляется
+        break_after = (),       # остановить чтение со следующей строки, если текущая строка должна быть добавлена - добавить её
+
         encoding:str = FILES_DEFAULT_ENCODING   # кодировка файла
 ):
+    def _modifications():
+        nonlocal s
+        while len(s) > 0 and s[-1] in ['\n', '\r']:
+            # удалить переводы строк
+            s = s[0:len(s)-1]
+        if strip_spaces_at_begins:
+            # удалить пробелы в начале
+            s = s.lstrip()
+        if strip_spaces_at_ends:
+            # удалить пробелы в конце
+            s = s.rstrip()
+        if len(comment_sequence) > 0:
+            # удалить комментарии начиная с этой последовательности означающей однострочный комментарий до конца строки
+            p = s.find(comment_sequence)
+            if p >= 0:
+                s = s[0:p]
+        if len(replaces) > 0 and len(s) > 0:
+            # определён список замен
+            for key in replaces.keys():
+                value = replaces[key]
+                value = value.replace('${line_number}', str(line_number))
+                s = s.replace(key, value)
+        if max_length >= 0:
+            # укоротить строку до max_length символов
+            s = s[0:max_length]
+
+    def _in_array(checking_value, items, allow_partial_matching_for_strings:bool = False):
+        for x in items:
+            if checking_value == x:
+                return True
+            if allow_partial_matching_for_strings and type(checking_value) == type("abc"):
+                if x.find(checking_value) >= 0:
+                    return True
+        return False
+    
+    def _from_list(text_value, number_value, items):
+        for x in items:
+            if type(x) == type("abc"):
+                if text_value.find(x) >= 0:
+                    return True
+            elif type(x) == type(123):
+                if x == number_value:
+                    return True
+        return False
+
+    def _checks():
+        nonlocal s
+        nonlocal line_number
+        nonlocal state
+        line = s
+        if ignore_empty and len(s) == 0:
+            return False
+        # не пустая строка, значит можно применять к ней проверки
+        accept_this_line = state == STATE__ACCEPT
+        if len(ignore_while) > 0:
+            if _from_list(line, line_number, ignore_while):
+                return False
+        if len(accept_while) > 0:
+            if not _from_list(line, line_number, accept_while):
+                return False
+        if len(accept_after) > 0:
+            if _from_list(line, line_number, accept_after):
+                state == STATE__ACCEPT
+        if len(accept_since) > 0:
+            if _from_list(line, line_number, accept_since):
+                accept_this_line = True
+                state == STATE__ACCEPT
+        if len(ignore_after) > 0:
+            if _from_list(line, line_number, ignore_after):
+                state == STATE__IGNORE
+        if len(ignore_since) > 0:
+            if _from_list(line, line_number, ignore_since):
+                accept_this_line = False
+                state == STATE__IGNORE
+        if len(break_at) > 0:
+            if _from_list(line, line_number, break_at):
+                accept_this_line = False
+                state = STATE__BREAK
+        if len(break_after) > 0:
+            if _from_list(line, line_number, break_after):
+                state = STATE__BREAK
+        return accept_this_line
+        
+
+    STATE__ACCEPT = 'a'
+    STATE__IGNORE = 'i'
+    STATE__BREAK = 'b'
     result = []
     if not os.path.isfile(filename):
-        return result
+        return None
+    accept_while = scalar_to_tuple(accept_while)
+    accept_since = scalar_to_tuple(accept_since)
+    accept_after = scalar_to_tuple(accept_after)
+
+    ignore_while = scalar_to_tuple(ignore_while)
+    ignore_since = scalar_to_tuple(ignore_since)
+    ignore_after = scalar_to_tuple(ignore_after)
+
+    break_at = scalar_to_tuple(break_at)
+    break_after = scalar_to_tuple(break_after)
+
     with open(filename, "rt", encoding=encoding) as f:
         lines_count = 0
-        begin_reading = begin_after_sequence == ""
+        if len(accept_since) > 0 or len(accept_after) > 0:
+            # принимать строки только после некоторого критерия, сначала строки не принимаются
+            state = STATE__IGNORE
+        else:
+            state = STATE__ACCEPT
         for s in f:
-            lines_count += 1            
-            if begin_after_number > 0 and lines_count < begin_after_number:
-                continue # начинать чтение со строки с указанным номером
-            if stop_after_number > 0 and lines_count > stop_after_number:
-                break # продолжать чтение до строки с указанным номером
-            if begin_reading and stop_after_sequence != "" and s.find(stop_after_sequence) >= 0:
-                break # прекратить чтение как только встретится эта последовательность
-            if not begin_reading and s.find(begin_after_sequence) >= 0:
-                begin_reading = True
-                if not begin_reading:
-                    continue # ещё не встретилась последовательность, начиная с которой читать файл
-            while len(s) > 0 and s[-1] in '\n\r':
-                s = s[0:len(s)-1] # удалить переводы строки в конце строки
-            s = remove_comment(s, comment_sequence) # удалить комментарии
-            if strip_spaces_at_begins:
-                s = s.lstrip() # удалить пробелы в начале
-            if strip_spaces_at_ends:
-                s = s.rstrip() # удалить пробелы в конце
-            if skip_empty_lines and len(s) == 0:
-                continue # пустая строка
-            result.append(s)
-            if store_max_count > 0 and len(result) >= store_max_count:
-                break # в результат сохранено максимальное количество строк
+            lines_count += 1
+            line_number = lines_count - 1 + numerate_lines_since
+            _modifications()
+            if _checks():
+                result.append(s)
+                if max_count >= 0 and len(result) >= max_count:
+                    # прочитано необходимое количество строк
+                    break
+            if state == STATE__BREAK:
+                break
     return result
 
+
 #lines = file_to_array("notes.txt"); print(lines); exit(0)
-#lines = file_to_array("notes.txt", stop_after_sequence="http"); print(lines); exit(0)
-#lines = file_to_array("notes.txt", begin_after_number=2, stop_after_number=3); print(lines); exit(0)
+#lines = file_to_array("notes.txt", comment_sequence='#', ignore_empty=True, break_at='zzz', max_count=3); print(lines); exit(0)
 
 # --- Получить имя файла из каталог изменявшегося позже всех (но исключая перечисленные в exclude[])---
-def get_last_file(dirname:str, startswith:str = "", endswith:str = "", exclude = []) -> str:
+def get_last_file(dirname:str, startswith:str = "", endswith:str = "", exclude = {}) -> str:
     if os.path.isfile(dirname):
         # вместо каталога указан файл - выделить путь к каталогу
         dirname = os.path.dirname(dirname)
@@ -398,7 +552,7 @@ def get_file_attr_str(filename, args):
         result += '\t' + attr
 
     # +++ время изменения +++
-    if args.size:
+    if args.time:
         try:
             attr_ts = os.path.getmtime(filename)
             #attr = datetime.datetime.fromtimestamp(attr).strftime('%Y-%m-%d %H:%M:%S')
@@ -432,8 +586,7 @@ def get_timestamp(some_date_time = None, date_divider = "-", date_time_divider =
     ts = some_date_time.strftime(ts_format)
     return ts
 
-#print(get_timestamp(None, "-", "T", ":"))
-#exit(0)
+#print(get_timestamp(None, "-", "T", ":")); exit(0)
 
 """
 def build_scan_result_string(kind, path, attr = None):
@@ -460,67 +613,106 @@ def build_scan_result_string(kind, path, attr = None):
     return result
 """
 
-def prepare_message(message:str, kind:str = "") -> str:
-    if len(message) == 0:
-        #return "" # не указан текст сообщения
-        return None # если не указан текст сообщения для пользователя, то ничего и не выводить
+def remove_starting_symbols(s: str, removable_symbols) -> str:
+    while len(s) > 0 and s[0] in removable_symbols:
+        s = s[1:len(s)]
+    return s
+
+def remove_ending_symbols(s: str, removable_symbols) -> str:
+    while len(s) > 0 and s[-1] in removable_symbols:
+        s = s[0:len(s)-1]
+    return s
+
+def remove_starting_slashes(s:str) -> str:
+    return remove_starting_symbols(s, SLASHES)
+
+def remove_ending_slashes(s:str) -> str:
+    return remove_ending_symbols(s, SLASHES)
+
+
+def defined(x, other_undefined = (), all_defined = ()):
+    if x is None:
+        return False
+    if x == '':
+        return False
+    if len(other_undefined) > 0:
+        # указаны другие значения, при которых считать значение "x" неопределённым
+        if x in other_undefined:
+            return False
+    if len(all_defined) > 0:
+        # указан список в который должно входить значение "x", чтобы считаться определённым
+        if x in all_defined:
+            return True
+        return False
+    return True
+
+#print(defined(123, (132, 1231), (456,))); exit(0)
+#print('matched') if 0 == '' else print('not matched'); exit(0)
+
+def prepare_message(message:str, kind:str = '') -> str:
+    if not defined(message):
+        return '' # не указан текст сообщения
+    message = message.strip()
+    message = remove_starting_symbols(message, COMMENT_SYMBOL) # если комментарий уже указан - удалить его, т.к. будет добавляться префикс с типом сообщения
+    message = message.strip()
+    if not defined(message):
+        return '' # после удавления пробелов в начале и конце и символов комментария получилась пустая строка
     if message[0].islower():
         # перевести первый символ в верхний регистр, если он в нижнем
-        ch = message[0]
-        ch = ch.upper()
-        message = ch + message[1:len(message)]
-    punctuation_symbol = "."
-    if kind == MESSAGE_KIND__VERBOSE:
-        if VERBOSE_MODE:
-            message = "INFO. " + message
-        else:
-            return None
-    elif kind == MESSAGE_KIND__WARNING:
-        message = "WARNING! " + message
-        punctuation_symbol = "!"
-    elif kind == MESSAGE_KIND__ERROR:
-        message = "ERROR!!! " + message
-        punctuation_symbol = "!"
-    elif kind == MESSAGE_KIND__FATAL:
-        message = "FATAL_ERROR!!! " + message
-        punctuation_symbol = "!"
+        message = message.capitalize()
+    punctuation_symbol = ''
+    this_message_logging_level = None
+    if kind == MESSAGE_KIND__QUESTION:
+        message = '[' + get_timestamp() + '] ' + 'QUESTION: ' + message
+        punctuation_symbol = '?'
     elif kind == MESSAGE_KIND__DEBUG:
-        if DEBUG_MODE:
-            message = "Debug: " + message
-        else:
-            return None
-    elif kind == MESSAGE_KIND__QUESTION:
-        message = "QUESTION: " + message
-        punctuation_symbol = "?"
-    elif kind != "":
-        message = kind + message
-    if message[-1] not in (".", "!", "?"):
+        this_message_logging_level = LOGGING_LEVEL__DEBUG   # 1
+        message = '[' + get_timestamp() + '] ' + 'DEBUG: ' + message
+    elif kind == MESSAGE_KIND__INFO:
+        this_message_logging_level = LOGGING_LEVEL__INFO    # 2
+        message = '[' + get_timestamp() + '] ' + 'INFO: ' + message
+        punctuation_symbol = "."
+    elif kind == MESSAGE_KIND__WARNING:
+        this_message_logging_level = LOGGING_LEVEL__WARNING # 3
+        message = '[' + get_timestamp() + '] ' + 'WARNING! ' + message
+        punctuation_symbol = '!'
+    elif kind == MESSAGE_KIND__ERROR:
+        this_message_logging_level = LOGGING_LEVEL__ERROR   # 4
+        message = '[' + get_timestamp() + '] ' + 'ERROR!! ' + message
+        punctuation_symbol = '!'
+    elif kind == MESSAGE_KIND__FATAL:
+        this_message_logging_level = LOGGING_LEVEL__FATAL   # 5
+        message = '[' + get_timestamp() + '] ' + 'FATAL_ERROR!!! ' + message
+        punctuation_symbol = "!"
+    if defined(this_message_logging_level) and this_message_logging_level < LOGGING_LEVEL:
+        # более серьёзные сообщения имеют больший номер, а уровень текущего сообщения не дотягивает до заданного уровня
+        return ''
+    if defined(punctuation_symbol) and message[-1] not in ('.', '!', '?'):
         message += punctuation_symbol # если строка не заканчивется символом пунктуации, то поставить соответствующий типу сообщения знак пунктуации
+    message = COMMENT_SYMBOL + ' ' + message
     return message
 
+#print(prepare_message('  #   привет  ', MESSAGE_KIND__QUESTION)); exit(0)
 
 def print_message(message:str, kind:str = MESSAGE_KIND__RAW, display:bool = True, file_stream:any = None) -> None:
-    #if len(message) == 0: убрать, чтобы можно было выводить пустые строки
-    #    return
-    if kind != "" and kind != MESSAGE_KIND__RAW and kind != MESSAGE_KIND__COMMENT:
-        # Если это сообщение для пользователя, внести коррективы в текст (начать с большой буквы, знаки препинания в конце, добавить название типа сообщения)
-        message = prepare_message(message, kind)
-        if message == None:
-            return # не включен режим, при котором выводить сообщения данного типа
-    if kind != MESSAGE_KIND__RAW and ((message != '' and message[0] != COMMENT_SYMBOL) or (message == '')):
-        message = COMMENT_SYMBOL + " " + message
-
-    if file_stream != None:
-        #message_to_file_stream = message
-        #if kind != MESSAGE_KIND__RAW and message[0] != COMMENT_SYMBOL:
-        #    # если это сообщение для пользователя и символ комментария не стоит - добавить символ комментария
-        #    message_to_file_stream = COMMENT_SYMBOL + " " + message
-        #file_stream.write(message_to_file_stream + "\n")
-        file_stream.write(message + "\n")
-    if kind == MESSAGE_KIND__FATAL:
-        raise Exception(message)
-    if display:
-        print(message)
+    if kind == MESSAGE_KIND__RAW:
+        if display:
+            print(message)
+        if not file_stream is None:
+            file_stream.write(message + '\n')
+    else:
+        message = prepare_message(message)
+        if not defined(message):
+            return
+        if not file_stream is None:
+            file_stream.write(message + '\n')
+        if kind == MESSAGE_KIND__FATAL:
+            raise Exception(message)
+        elif kind == MESSAGE_KIND__ERROR:
+            # ошибки выводятся в поток ошибок
+            print(message, file=sys.stderr)
+        else:
+            print(message)
 
 
 # --- Находится ли имя файла или каталога в переданном списке имён и масок включающих символы * и ? ---
@@ -686,10 +878,9 @@ def get_date_time_by_age(age_str: str) -> datetime:
 #print(get_date_time_by_age("15 month")); exit(0)
 
 
-def remove_ending_symbols(s: str, removable_symbols: str) -> str:
-    while len(s) > 0 and s[-1] in removable_symbols:
-        s = s[0:len(s)-1]
-    return s
+
+#print(remove_ending_slashes("hello \\df/\/")); exit(0)
+#print(remove_starting_slashes("/\\hello \\df/\/")); exit(0)
 
 #print(os.path.join("/dir1/", "file1.txt")); exit(0)
 
@@ -699,8 +890,8 @@ def get_output(filename, command, append, note):
     if filename == '':
         return None
     if filename[-1] in ['\\', '/']:
-        # указан каталог, в котором создать новый файл
-        filename = remove_ending_symbols(filename, "\\/")
+        # указан каталог, в котором создать новый файл; если каталог не существует - создать его
+        filename = remove_ending_slashes(filename)
         if filename == '':
             # был указан корневой каталог unix-а
             filename = "/"
@@ -728,13 +919,14 @@ def get_output(filename, command, append, note):
     return f
 
 def close_output(f, command):
-    msg = '\t'
-    msg += '---'
-    msg  += ' [' + get_timestamp() + ']'
-    msg += ' Complete ' + command
-    msg += ' ---'
-    print_message(msg, MESSAGE_KIND__COMMENT, False, f)
-    f.close()
+    if not f is None:
+        msg = '\t'
+        msg += '---'
+        msg  += ' [' + get_timestamp() + ']'
+        msg += ' Complete ' + command
+        msg += ' ---'
+        print_message(msg, MESSAGE_KIND__COMMENT, False, f)
+        f.close()
 
 
 def age_one_measure(age, measure):
@@ -858,8 +1050,10 @@ def inc_date(timedelta_str, dt0 = datetime.datetime.now()):
 """
     
 def prepare_arguments(args):
-    if (args.print == False or args.print is None) and args.output is None:
-        args.print = True
+    if "print" in args:
+        if (args.print is None or args.print == False) and args.output is None:
+            # если нет вывода в файл - принудительно выводить на экран
+            args.print = True
     if args.command == 'scan':
         args._skip_before = None
         args._skip_after = None
@@ -877,17 +1071,35 @@ def prepare_arguments(args):
                 args._skip_after = d
     return args
 
+
+def is_array_or_tuple(x:any) -> bool:
+    if x is None:
+        return False
+    if type(x) == type([]):
+        return True
+    if type(x) == type(()):
+        return True
+    return False
+
+#print(is_array_or_tuple(None)); exit(0)
+#print(is_array_or_tuple("a")); exit(0)
+#print(is_array_or_tuple(["a", 123])); exit(0)
+#print(is_array_or_tuple(("a", 123))); exit(0)
+#print(is_array_or_tuple({"key" : 123})); exit(0)
+
 def get_skipping_items(args):
     skip = DEFAULT_SKIP.copy()
 
     # добавить отдельные маски перечисленные в параметрах --skip
-    for elem in args.skip:        
-        skip.append(elem)
+    if is_array_or_tuple(args.skip):
+        for elem in args.skip:        
+            skip.append(elem)
 
     # добавить маски перечисленные в файлах указанных в параметрах --skip-from
-    for elem in args.skip_from:
-        skip_from = file_to_array(elem)
-        skip += skip_from
+    if is_array_or_tuple(args.skip_from):
+        for elem in args.skip_from:
+            skip_from = file_to_array(elem, comment_sequence=COMMENT_SYMBOL, ignore_empty=True)
+            skip += skip_from
 
     skip = set(skip)
     #print(skip); exit(0)
@@ -929,78 +1141,317 @@ def read_scan_results(filename:str):
 
 
 def do_compare(args):
-    scan_results_dir = None
-    prev_scan_file = None
-    next_scan_file = None
+    old_scan_file = None   # файл с результатами сканирования до изменений
+    new_scan_file = None   # файл с результатами сканирования после изменений
     if len(args.input) == 0:
         # не указаны файлы с результатами сканирования, искать последние два файла в текущем каталоге
-        scan_results_dir = '.'
-    else:
+        new_scan_file = get_last_file(".", PREFIX_SCAN, DEFAULT_EXTENSION)
+        old_scan_file = get_last_file(".", PREFIX_SCAN, DEFAULT_EXTENSION, new_scan_file)
+    elif len(args.input) == 1:
+        # указан один input-параметр (если один - это должен быть каталог, из которого взять два последних файла)
+        if not os.path.isdir(args.input[0]):
+            raise Exception('"{}" is not directory or not exist.' . format(args.input[0]))
+        new_scan_file = get_last_file(args.input[0], PREFIX_SCAN, DEFAULT_EXTENSION)
+        old_scan_file = get_last_file(args.input[0], PREFIX_SCAN, DEFAULT_EXTENSION, new_scan_file)
+    elif len(args.input) >= 2:
+        # указаны два input-параметра. Если указан каталог - взять последний файл, если файл - этот файл
+        # первый параметр - до изменений, второй параметр - после изменений
         if os.path.isdir(args.input[0]):
-            scan_results_dir = args.input[0]
-    if not scan_results_dir is None:
-        next_scan_file = get_last_file(scan_results_dir, PREFIX_SCAN, DEFAULT_EXTENSION)
-        prev_scan_file = get_last_file(scan_results_dir, PREFIX_SCAN, DEFAULT_EXTENSION, next_scan_file)
-    else:
-        prev_scan_file = args.input[0]
-        next_scan_file = args.input[1]
-    prev_scan_results = read_scan_results(prev_scan_file)
-    next_scan_results = read_scan_results(next_scan_file)
-    prev_names_list = list(prev_scan_results.keys())
-    next_names_list = list(next_scan_results.keys())
+            old_scan_file = get_last_file(args.input[0], PREFIX_SCAN, DEFAULT_EXTENSION)
+        else:
+            old_scan_file = args.input[0]
+        if os.path.isdir(args.input[1]):
+            new_scan_file = get_last_file(args.input[0], PREFIX_SCAN, DEFAULT_EXTENSION)
+        else:
+            new_scan_file = args.input[0]
+
+    old_scan_results = read_scan_results(old_scan_file)
+    new_scan_results = read_scan_results(new_scan_file)
+    old_names_list = list(old_scan_results.keys())
+    new_names_list = list(new_scan_results.keys())
     deleted = []
     created = []
     updated = []
 
     # поиск удалённых
-    for elem in prev_names_list:
-        if elem not in next_scan_results:
+    for elem in old_names_list:
+        if elem not in new_scan_results:
             deleted.append(elem)
 
-    # поиск созданных
-    for elem in next_names_list:
-        if elem not in prev_scan_results:
+    # поиск созданных или обновлённых
+    for elem in new_names_list:
+        if elem in old_scan_results:
+            # файл/каталог присутствует в обоих списках
+            if new_scan_results[elem] != old_scan_results[elem]:
+                # файл изменился
+                updated.append(elem)
+        else:
+            # новый файл/каталог
             created.append(elem)
 
-    # поиск обновлённых
-    for elem in next_names_list:
-        if elem in prev_scan_results:
-            if next_scan_results[elem] != prev_scan_results[elem]:
-                updated.append(elem)
 
     f = get_output(args.output, args.command, args.append, args.note)
 
     #msg = '\t----- [{}]  Difference for "{}" and "{}" ---' . format(get_timestamp(), prev_scan_file, next_scan_file)
     #msg = 'Difference for "{}" and "{}" ---' . format(prev_scan_file, next_scan_file)
-    msg = 'File#1 (before): "{}"' . format(prev_scan_file)
+    msg = 'File#1 (before): "{}"' . format(old_scan_file)
     print_message(msg, MESSAGE_KIND__COMMENT, args.print, f)
-    msg = 'File#2 (after): "{}"' . format(next_scan_file)
+    msg = 'File#2 (after): "{}"' . format(new_scan_file)
     print_message(msg, MESSAGE_KIND__COMMENT, args.print, f)
     print_message('', MESSAGE_KIND__RAW, args.print, f)
 
     msg = '\t--- Deleted ({}) ---' . format(len(deleted))
     print_message(msg, MESSAGE_KIND__COMMENT, args.print, f)
     for elem in deleted:
-        msg = 'deleted' + '\t' + elem + '\t' + prev_scan_results[elem]
+        msg = 'deleted' + '\t' + elem
+        if old_scan_results[elem] != '':
+            msg += '\t' + old_scan_results[elem]
         print_message(msg, MESSAGE_KIND__RAW, args.print, f)
     print_message('', MESSAGE_KIND__RAW, args.print, f)
 
     msg = '\t--- created ({}) ---' . format(len(created))
     print_message(msg, MESSAGE_KIND__COMMENT, args.print, f)
     for elem in created:
-        msg = 'created' + '\t' + elem + '\t' + next_scan_results[elem]
+        msg = 'created' + '\t' + elem
+        if new_scan_results[elem] != '':
+            msg += '\t' + new_scan_results[elem]
         print_message(msg, MESSAGE_KIND__RAW, args.print, f)
     print_message('', MESSAGE_KIND__RAW, args.print, f)
 
     msg = '\t--- Updated ({}) ---' . format(len(updated))
     print_message(msg, MESSAGE_KIND__COMMENT, args.print, f)
     for elem in updated:
-        msg = 'updated' + '\t' + elem + '\t' + prev_scan_results[elem] + '\t=>\t' + next_scan_results[elem]
+        msg = 'updated' + '\t' + elem + '\t' + old_scan_results[elem] + '\t=>\t' + new_scan_results[elem]
         print_message(msg, MESSAGE_KIND__RAW, args.print, f)
-    print_message('\t-----', MESSAGE_KIND__COMMENT, args.print, f)
-    if f != None:
-        f.close()
+    #print_message('\t-----', MESSAGE_KIND__COMMENT, args.print, f)
+        print_message('', MESSAGE_KIND__RAW, args.print, f)
+    close_output(f, args.command)
 
+
+def make_slashes__windows(s):
+    if len(s) > 0 and s[0] == '/':
+        s = '%SYSTEMDRIVE%' + s
+    return s.replace('/', '\\')
+
+#print(make_slashes__windows('/var/tmp/file1.txt')); exit(0)
+
+def make_slashes__unix(s):
+    return s.replace('\\', '/')
+
+def make_slashes__current(s):
+    if SLASH == '/':
+        return make_slashes__unix(s)
+    elif SLASH == '\\':
+        return make_slashes__windows(s)
+    return s # не должно возникать
+
+
+def do_build__delete(output_root_dir, fu, fw, items):
+    fu.write('# --- delete ---\n')
+    fw.write('rem --- delete ---\n')
+    for elem in items:
+        # удаляемые каталоги
+        if elem[-1] in SLASHES:
+            # каталог
+            elem = remove_ending_slashes(elem)
+            dirname_unix    = make_slashes__unix(elem)
+            dirname_windows = make_slashes__windows(elem)
+            fu.write('if [ -d "{}" ]; then rm -r -f "{}"; fi\n'. format(dirname_unix, dirname_unix))
+            fw.write('if exist "{}" rmdir /s /q "{}"\n' . format(dirname_windows, dirname_windows))
+    for elem in items:
+        # удаляемые файлы
+        if not elem[-1] in SLASHES:
+            # файл
+            filename_unix    = make_slashes__unix(elem)
+            filename_windows = make_slashes__windows(elem)
+            fu.write('if [ -f "{}" ]; then rm "{}"; fi\n' . format(filename_unix, filename_unix))
+            fw.write('if exist "{}" del /f /q "{}"\n' . format(filename_windows, filename_windows))
+    fu.write('\n')
+    fw.write('\n')
+
+
+def do_build__update(output_root_dir, fu, fw, items):
+    fu.write('# --- update ---\n')
+    fw.write('rem --- update ---\n')
+    for elem in items:
+        # "обновляемые" каталоги; не должно возникать, но если есть обрабатывать как создаваемые
+        if elem[-1] in SLASHES:
+            # каталог
+            elem = remove_ending_slashes(elem)
+            dirname_unix    = make_slashes__unix(elem)
+            dirname_windows = make_slashes__windows(elem)
+            fu.write('if [ ! -d "{}" ]; then mkdir "{}"; fi\n' . format(dirname_unix, dirname_unix))
+            fw.write('if not exist "{}" mkdir "{}"\n' . format(dirname_windows, dirname_windows))
+    for elem in items:
+        # обновляемые файлы
+        if not elem[-1] in SLASHES:
+            # файл
+            write__copy_file(output_root_dir, elem, fu, fw)
+
+    fu.write('\n')
+    fw.write('\n')
+
+
+def do_build__create(output_root_dir, fu, fw, items):
+    fu.write('# --- create ---\n')
+    fw.write('rem --- create ---\n')
+    for elem in items:
+        # новые каталоги
+        if elem[-1] in SLASHES:
+            # каталог
+            elem = remove_ending_slashes(elem)
+            dirname_unix    = make_slashes__unix(elem)
+            dirname_windows = make_slashes__windows(elem)
+            fu.write('if [ ! -d "{}" ]; then mkdir "{}"; fi\n' . format(dirname_unix, dirname_unix))
+            fw.write('if not exist "{}" mkdir "{}"\n' . format(dirname_windows, dirname_windows))
+    for elem in items:
+        # новые файлы
+        if not elem[-1] in SLASHES:
+            # файл
+            write__copy_file(output_root_dir, elem, fu, fw)
+    fu.write('\n')
+    fw.write('\n')
+
+
+def parse_filename(s):
+    dirname = ''
+    filename = ''
+    i = len(s) - 1
+    while i >= 0:
+        if s[i] in SLASHES:
+            break
+        i -= 1
+    # ab\cd.txt         c:\temp\file1.txt  => disk_C\temp\file1.txt
+    # 012345678  {9}
+    dirname = s[0:i]
+    filename = s[i+1:len(s)]
+    if len(dirname) >= 2:
+        if dirname[1] == ':':
+            dirname = 'disk_' + dirname[0].upper() + dirname[2:len(dirname)]
+    #if SLASH == '/':
+    #    # скрипт работает на unix, заменить виндовые слеши
+    #    dirname = dirname.replace('\\', '/')
+    #elif SLASH == '\\':
+    #    dirname = dirname.replace('/', '\\')
+    return (dirname, filename)
+
+#print(parse_filename("c:\\temp\\file1.txt")); exit(0)
+#print(parse_filename("c:\\temp\\file1")); exit(0)
+#print(parse_filename("/tmp")); exit(0)
+#print(parse_filename("/tmp/file.zip")); exit(0)
+
+
+def write__copy_file(output_root_dir, src_filename, fu, fw):
+    (dirname_build_short, filename_build_short) = parse_filename(src_filename) 
+    dirname_build_short = make_slashes__current(dirname_build_short)
+    dirname_build_in_output = output_root_dir + SLASH + dirname_build_short
+    if not os.path.exists(dirname_build_in_output):
+        os.makedirs(dirname_build_in_output)
+    filename_build_in_output = dirname_build_in_output + SLASH + filename_build_short
+    copy_cmd_unix = 'cp -p -f "{}" "{}"'.format(
+        make_slashes__unix(filename_build_in_output),
+        make_slashes__unix(src_filename)
+    )
+    copy_cmd_windows = 'copy /Y "{}" "{}"'.format(
+        make_slashes__windows(filename_build_in_output),
+        make_slashes__windows(src_filename)
+    )
+    if os.path.isfile(src_filename):
+        # есть с чего делать копию в каталоге "build"
+        shutil.copy2(src_filename, filename_build_in_output)
+        fu.write(copy_cmd_unix + '\n')
+        fw.write(copy_cmd_windows + '\n')
+    else:
+        fu.write('# !!! file does not exist ' + copy_cmd_unix + '\n')
+        fw.write('rem !!! file does not exist ' + copy_cmd_windows + '\n')
+
+
+def do_build(args):
+    scan_results_file = None
+    if args.input is None:
+        # не указан файл с результатами сравнения (или каталог с этим файлом) - взять последний файл из текущего каталога
+        scan_results_file = get_last_file(".", PREFIX_COMPARE, DEFAULT_EXTENSION)
+        if scan_results_file is None:
+            msg = 'Cannot detect file with scan results in current directory.'
+            raise Exception(msg)
+    elif os.path.isdir(args.input):
+        scan_results_file = get_last_file(args.input, PREFIX_COMPARE, DEFAULT_EXTENSION)
+        if scan_results_file is None:
+            msg = 'Cannot detect file with scan results in "{}" directory.' . format(args.input)
+            raise Exception(msg)
+    else:
+        scan_results_file = args.input
+
+    output_root_dir = None
+    if args.output is None or args.output == '' or args.output == '.':
+        output_root_dir = "./build"
+    else:
+        output_root_dir = remove_ending_slashes(args.output)
+    if os.path.isfile(output_root_dir):
+        msg = 'Output "{}" already exists and it is a file.' . format(output_root_dir)
+        raise Exception
+    if not os.path.isdir(output_root_dir):
+        os.makedirs(output_root_dir)
+    
+    f = open(scan_results_file, 'rt')
+    created = []
+    updated = []
+    deleted = []
+    for s in f:
+        s = s.strip()
+        s = remove_comment(s, COMMENT_SYMBOL)
+        if len(s) == 0:
+            continue
+        parts = s.split("\t")
+        #print(s, parts)
+        if len(parts) < 2:
+            continue
+        if parts[0] == 'created':
+            created.append(parts[1])
+        elif parts[0] == 'updated':
+            updated.append(parts[1])
+        elif parts[0] == 'deleted':
+            deleted.append(parts[1])
+    f.close()
+
+    '''created.append('/tmp/123/')
+    created.append('testdir1/NewFile.txt')
+    created.append('c:\\temp/NewFileOnWindows.txt')
+    deleted.append('/tmp/FileForDelete_on_unix.txt')
+    deleted.append('c:\\temp\\FileForDelete_on_windows.txt')
+    deleted.append('c:\\temp\\dir1\\')'''
+
+    if DEBUG_MODE: print('CREATED:', created)
+    if DEBUG_MODE: print('UPDATED:', updated)
+    if DEBUG_MODE: print('DELETED:', deleted)
+
+    filename_unix = PREFIX_BUILD + '_' + get_timestamp(None, '-', '_', '-') + '_unix.sh'
+    filename_windows = PREFIX_BUILD + '_' + get_timestamp(None, '-', '_', '-') + 'windows.bat'
+    filename_unix = os.path.join(output_root_dir, filename_unix)
+    filename_windows = os.path.join(output_root_dir, filename_windows)
+
+    fu = open(filename_unix, 'wt', encoding='utf-8', newline='\n')
+    fu.write('#!/usr/bin/env sh\n')
+    fu.write('\n')
+
+    fw = open(filename_windows, 'wt', encoding='utf-8', newline='\r\n')
+    fw.write('echo off\n')
+    fw.write('cls\n')
+    fw.write('\n')
+
+    if defined(args.note):
+        # комментарий к выполняемому действию
+        fu.write('# ' + args.note + '\n')
+        fu.write('\n')
+        fw.write('rem ' + args.note + '\n')
+        fw.write('\n')
+
+    do_build__delete(output_root_dir, fu, fw, deleted)
+    do_build__create(output_root_dir, fu, fw, created)
+    do_build__update(output_root_dir, fu, fw, updated)
+
+    fu.close()
+    fw.close()
 
 
 if __name__ == "__main__":
@@ -1019,19 +1470,17 @@ if __name__ == "__main__":
     else:
         # использовать реальные параметры командной строки
         if len(sys.argv) == 1:
-            # параметров в командной стрке не задано - вывести справку и выйти
+            # параметров в командной строке не задано - вывести справку и выйти
             parser.print_help()
             exit(0)
         args = parser.parse_args()
 
     args = prepare_arguments(args)
-    print("args:", args); #exit(0)
+    if DEBUG_MODE: print("args:", args); #exit(0)
 
     if args.command == 'help':
-        print('help...')
         parser.print_help()
     elif args.command == 'scan':
-        print('scan...')
         #print("output:", args.output)
         #print("dirs[]:", args.directory)
         f = get_output(args.output, args.command, args.append, args.note)
@@ -1041,10 +1490,6 @@ if __name__ == "__main__":
             do_scan(d, f, args, skip, INITIAL_DEPTH)
         close_output(f, args.command)
     elif args.command == 'compare':
-        print('compare...')        
         do_compare(args)
-    exit(0)
-
-    parser = get_parser_definiton()
-    #args = parser.parse_args()
-    parser.print_help()
+    elif args.command == 'build':
+        do_build(args)
