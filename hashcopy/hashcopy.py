@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 
 import argparse
-import sys
 import os
 import hashlib
 import zlib
 import shutil
 import fnmatch
-#import glob
 
 HASH_METHODS = ['crc32', 'md5', 'sha256', 'sha512', 'sha384', 'sha1']
 HASH_OPEN_DELIMITER = "("
@@ -57,23 +55,36 @@ def split_file_path(path):
 
 
 def get_hash__crc32(filename):
-    result = ""
     if not os.path.isfile(filename):
-        return result
+        return 'is not a file'
+    if not os.access(filename, os.R_OK):
+        return 'no read permissions'
+    result = ''
     try:
-        file = open(filename, 'rb')
-        buf = file.read()
-        result = hex(zlib.crc32(buf))
-        file.close()
+        with open(filename, 'rb') as f:
+            buf = f.read()
+            result = hex(zlib.crc32(buf))
+            buf = None # освободить память
+            if len(result) > 2 and result[0] == '0' and result[1] == 'x' and len(result) < 10:
+                # если длина хеша меньше 8 символов - добавить ведущие нули
+                # 0123456789
+                # 0x80cba396
+                #   01234567
+                result = result[2:len(result)]
+                while len(result) < 8:
+                    result = '0' + result
+                result = '0x' + result
     except:
         result = ''
     return result
 
 
 def get_hash__from_hashlib(filename, method, block_size = 2**20):
-    result = ""
     if not os.path.isfile(filename):
-        return result
+        return 'is not a file'
+    if not os.access(filename, os.R_OK):
+        return 'no read permissions'
+    result = ''
     try:
         f = open(filename, "rb")
         while True:
@@ -209,6 +220,7 @@ def get_arg_parser_definiton():
     parser.add_argument('-r', '--recursive', action='store_true', help='рекурсивный обход каталогов')
     parser.add_argument('-a', '--algo', default=HASH_METHODS[0], help='Алгоритм вычисления контрольных сумм. По умолчанию: ' + HASH_METHODS[0] + '; возможные варианты: ' + ', '.join(HASH_METHODS))
     parser.add_argument('-p', '--pattern', help='если в качестве источника указан каталог, в этом параметре можно задать маску файлов с использованием символов подстановки "*" и "?". Чтобы')
+    
 
     parser.add_argument('src', nargs=1, help='Исходный файл или каталог')
     parser.add_argument('dst', nargs='?', help='Целевой каталог')
